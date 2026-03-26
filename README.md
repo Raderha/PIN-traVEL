@@ -1,7 +1,11 @@
 # 핀블(PIN-traVEL)
+2026캡스톤디자인 개발6팀 깃허브입니다.
+
 - 팀명: 개발6팀
 - 구조: `apps/web`(프론트) + `apps/api`(서버)
+
 ## 프로젝트 구조(현 폴더 트리 + 역할)
+
 ```
 apps/
   api/                      - Node.js(Express) API 서버
@@ -9,7 +13,7 @@ apps/
     package.json            - 서버 의존성/스크립트
     src/
       index.js              - API 서버 엔트리(Express + Socket.IO 부팅)
-      routes/index.js        - 기능 라우터 마운트
+      routes/index.js       - 기능 라우터 마운트
       routes/modules/auth.js - UC1~3 인증 API(회원가입/로그인/로그아웃)
       routes/modules/map.js  - UC4 지도 기반 조회 API
       routes/modules/festivals.js - UC8 축제 달력/기간 조회 API
@@ -27,8 +31,10 @@ apps/
     src/App.tsx             - 임시 메인 화면(현재 템플릿 상태)
     src/index.css           - 전역 스타일
 ```
+
 ## 사용 스택
+
 - Frontend: React, TypeScript, Vite
 - Backend: Node.js, Express
 - Realtime(협업): Socket.IO
-- DATABASE : MongoDB(영속성 데이터), REDIS(세션 정보 관리)
+- DATABASE: MongoDB(영속성 데이터), REDIS(세션 정보 관리)
