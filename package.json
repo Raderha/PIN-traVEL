@@ -1,0 +1,14 @@
+{
+  "name": "pintravel",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @pintravel/api & npm run dev -w @pintravel/web",
+    "dev:api": "npm run dev -w @pintravel/api",
+    "dev:web": "npm run dev -w @pintravel/web",
+    "lint": "npm run lint -ws"
+  }
+}
+
