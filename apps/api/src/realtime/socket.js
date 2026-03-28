@@ -14,7 +14,7 @@ export function attachSocketServer(httpServer) {
   });
 
   io.on("connection", (socket) => {
-    // join session
+    // 세션 참여
     socket.on("session:join", ({ sessionId, username }) => {
       if (!sessionId) return;
       socket.join(sessionId);
@@ -26,14 +26,14 @@ export function attachSocketServer(httpServer) {
       socket.to(sessionId).emit("session:member-joined", { username: socket.data.username });
     });
 
-    // mouse cursor sharing (UC7-REQ-2)
+    // 마우스 공유 (UC7-REQ-2)
     socket.on("session:cursor", ({ x, y }) => {
       const sessionId = socket.data.sessionId;
       if (!sessionId) return;
       socket.to(sessionId).emit("session:cursor", { username: socket.data.username, x, y });
     });
 
-    // host view sync (UC7-REQ-3)
+    // 호스트 시점 동기화 (UC7-REQ-3)
     socket.on("session:map", ({ center, zoom }) => {
       const sessionId = socket.data.sessionId;
       if (!sessionId) return;
@@ -42,7 +42,7 @@ export function attachSocketServer(httpServer) {
       socket.to(sessionId).emit("session:map", { center, zoom });
     });
 
-    // cart sync (UC7-REQ-4)
+    // 장바구니 동기화 (UC7-REQ-4)
     socket.on("session:cart", ({ placeIds }) => {
       const sessionId = socket.data.sessionId;
       if (!sessionId) return;
@@ -51,7 +51,7 @@ export function attachSocketServer(httpServer) {
       socket.to(sessionId).emit("session:cart", { placeIds });
     });
 
-    // selected pin sync (optional)
+    // 핀 선택 동기화 
     socket.on("session:selectedPlace", ({ placeId }) => {
       const sessionId = socket.data.sessionId;
       if (!sessionId) return;
@@ -66,4 +66,3 @@ export function attachSocketServer(httpServer) {
     });
   });
 }
-
