@@ -1,8 +1,8 @@
 /**
  * 담당 유스케이스: UC8(축제 일정 달력)
  * 참고: UC4-REQ-6(지도 화면의 정보 요약형 핀 중 '축제' 핀 기간 필터링)은 지도 조회(UC4) 흐름에 해당하며,
- *      본 파일은 달력/기간조회용 축제 데이터 API만 제공한다.
- * 역할: 월별 축제 목록(달력 뷰) 및 날짜 범위 기반 축제 조회 API 제공
+ *      본 파일은 달력·단일 일자 조회용 축제 데이터 API만 제공한다.
+ * 역할: 월별 달력(일자별 개수)·단일 날짜 선택 시 축제 목록 API 제공(날짜 구간 다중 선택 미지원)
  */
 import { Router } from "express";
 import { z } from "zod";
@@ -23,8 +23,21 @@ function festivalActiveOnDate(f, day) {
   return f.startDate <= day && f.endDate >= day;
 }
 
+/** 축제 기간과 달력 구간 [from, to]가 하루라도 겹치는지 (YYYY-MM-DD 비교, 월 경계 계산용) */
+function festivalOverlapsInclusiveRange(f, from, to) {
+  if (!f.startDate || !f.endDate) return false;
+  return !(f.endDate < from || f.startDate > to);
+}
+
 function daysInMonth(year, month) {
   return new Date(year, month, 0).getDate();
+}
+
+/** 해당 연·월 달력(1일~말일)과 축제 기간이 하루라도 겹치는지 */
+function festivalOverlapsCalendarMonth(f, year, month) {
+  const last = daysInMonth(year, month);
+  const ym = `${year}-${pad2(month)}`;
+  return festivalOverlapsInclusiveRange(f, `${ym}-01`, `${ym}-${pad2(last)}`);
 }
 
 function pad2(n) {
@@ -44,7 +57,7 @@ function festivalListItem(f) {
   };
 }
 
-// UC8: 달력 그리드 — 해당 월의 각 일자별 '그날 진행 중인 축제' 개수
+// UC8: 달력 그리드 — 각 일자별 '그날 진행 중인 축제' 개수(03-01~03-12 축제는 1~12일 count에 반영, 해당 일 선택 시 /calendar/day에도 동일)
 festivalsRouter.get("/calendar/day-counts", (req, res) => {
   const parsed = z
     .object({
@@ -55,7 +68,7 @@ festivalsRouter.get("/calendar/day-counts", (req, res) => {
   if (!parsed.success) return res.status(400).json({ ok: false, error: "INVALID_QUERY" });
 
   const { year, month } = parsed.data;
-  const festivals = listFestivals();
+  const festivals = listFestivals().filter((f) => festivalOverlapsCalendarMonth(f, year, month));
   const lastDay = daysInMonth(year, month);
   const ym = `${year}-${pad2(month)}`;
   const days = [];
@@ -75,45 +88,5 @@ festivalsRouter.get("/calendar/day", (req, res) => {
   const { date } = parsed.data;
   const festivals = listFestivals().filter((f) => festivalActiveOnDate(f, date));
   return res.json({ ok: true, date, festivals: festivals.map(festivalListItem) });
-});
-
-// UC8: 월별 축제 목록(달력용)
-festivalsRouter.get("/month", (req, res) => {
-  const parsed = z
-    .object({
-      year: z.coerce.number().int().min(2000).max(2100),
-      month: z.coerce.number().int().min(1).max(12),
-    })
-    .safeParse(req.query);
-  if (!parsed.success) return res.status(400).json({ ok: false, error: "INVALID_QUERY" });
-
-  const { year, month } = parsed.data;
-  const ym = `${year}-${String(month).padStart(2, "0")}`;
-
-  const festivals = [...places.values()].filter((p) => p.kind === "festival" && (p.startDate?.startsWith(ym) || p.endDate?.startsWith(ym)));
-  return res.json({
-    ok: true,
-    festivals: festivals.map((f) => festivalListItem(f)),
-  });
-});
-
-// UC8-REQ-2: 특정 날짜(또는 범위) 상세
-festivalsRouter.get("/range", (req, res) => {
-  const parsed = z
-    .object({
-      from: z.string().min(10),
-      to: z.string().min(10),
-    })
-    .safeParse(req.query);
-  if (!parsed.success) return res.status(400).json({ ok: false, error: "INVALID_QUERY" });
-
-  const { from, to } = parsed.data;
-  const list = listFestivals();
-  const within = (p) => {
-    if (!p.startDate || !p.endDate) return false;
-    return !(p.endDate < from || p.startDate > to);
-  };
-
-  return res.json({ ok: true, festivals: list.filter(within) });
 });
 
