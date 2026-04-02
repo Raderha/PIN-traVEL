@@ -4,9 +4,23 @@
   flex-direction: column;
 }
 
+/* 로그인: 본문 스크롤 없이 한 화면(네비 제외)에 고정 */
+.app:has(.loginPage) {
+  height: 100dvh;
+  max-height: 100dvh;
+  min-height: 100dvh;
+  overflow: hidden;
+}
+
 .appMain {
   flex: 1 1 auto;
   padding: 20px 16px 32px;
   display: flex;
   justify-content: center;
+  min-height: 0;
+}
+
+.appMain:has(.loginPage) {
+  padding: 0;
+  align-items: stretch;
 }
