@@ -1,6 +1,15 @@
 /**
  * Raw 컬렉션을 서비스용 컬렉션으로 머지/정규화하는 스크립트.
  *
+ * 필요 : MongoDB 설치, pintravel 데이터베이스 생성 후 
+ * 
+ * db.createUser({
+ * user: "사용자이름",
+ * pwd: "비밀번호 설정",
+ * roles: [{ role: "readWrite", db: "pintravel" }]
+ * }) -> 사용자 생성 및 비밀번호 설정()
+
+ * 
  * 입력:
  * - places_raw (문서 예: { kind, contentId, raw, fetchedAt, ... })
  * - place_details_raw (문서 예: { kind, contentId, commonRaw, introRaw, ... })

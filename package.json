@@ -5,9 +5,9 @@
     "apps/*"
   ],
   "scripts": {
-    "dev": "npm run dev -w @pintravel/api & npm run dev -w @pintravel/web",
+    "dev": "npm run dev -w @pintravel/api & npm run dev -w web",
     "dev:api": "npm run dev -w @pintravel/api",
-    "dev:web": "npm run dev -w @pintravel/web",
+    "dev:web": "npm run dev -w web",
     "lint": "npm run lint -ws"
   }
 }
