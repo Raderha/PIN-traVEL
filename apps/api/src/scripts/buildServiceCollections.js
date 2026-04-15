@@ -72,6 +72,26 @@ function pointFromMapXY(mapx, mapy) {
   return { type: "Point", coordinates: [lng, lat] };
 }
 
+function regionFromRaw(listRaw) {
+  // TourAPI: 호출 방식/엔드포인트에 따라 키가 다를 수 있어 양쪽을 모두 흡수
+  const lDongRegnCdRaw = asString(pick(listRaw, ["ldongregncd", "lDongRegnCd", "l_dong_regn_cd"]));
+  const lDongSignguCdRaw = asString(pick(listRaw, ["ldongsigungucd", "lDongSignguCd", "l_dong_signgu_cd"]));
+  const areaCode = asString(pick(listRaw, ["areacode", "areaCode"]));
+  const sigunguCode = asString(pick(listRaw, ["sigungucode", "sigunguCode"]));
+
+  // 고정 자리수로 맞춤(시도 2자리, 시군구 3자리). 예: 26 + 440 => 26440
+  const lDongRegnCd = lDongRegnCdRaw ? lDongRegnCdRaw.padStart(2, "0") : null;
+  const lDongSignguCd = lDongSignguCdRaw ? lDongSignguCdRaw.padStart(3, "0") : null;
+
+  const idongCode = lDongRegnCd && lDongSignguCd ? `${lDongRegnCd}${lDongSignguCd}` : lDongRegnCd ? lDongRegnCd : null;
+
+  return {
+    idongCode,
+    idong: { regnCd: lDongRegnCd, signguCd: lDongSignguCd },
+    area: { areaCode, sigunguCode },
+  };
+}
+
 function placeDoc({ listRaw, commonRaw, introRaw }) {
   const contentId = asString(pick(listRaw, ["contentid", "contentId"])) ?? asString(listRaw?.contentId);
   if (!contentId) return null;
@@ -95,9 +115,12 @@ function placeDoc({ listRaw, commonRaw, introRaw }) {
   const parking = asString(pick(commonRaw, ["parking"])) ?? asString(pick(introRaw, ["parking"]));
   const usefee = asString(pick(commonRaw, ["usefee"])) ?? asString(pick(introRaw, ["usefee"]));
 
+  const region = regionFromRaw(listRaw);
+
   return {
     contentId,
     title,
+    ...region,
     category: { cat1, cat2, cat3 },
     address: { addr1, addr2 },
     location: pointFromMapXY(mapx, mapy),
@@ -133,9 +156,12 @@ function festivalDoc({ listRaw, commonRaw, introRaw }) {
   const playtime = asString(pick(introRaw, ["playtime", "playTime"])) ?? asString(pick(commonRaw, ["playtime", "playTime"]));
   const eventcost = asString(pick(introRaw, ["eventcost", "eventCost"])) ?? asString(pick(commonRaw, ["eventcost", "eventCost"]));
 
+  const region = regionFromRaw(listRaw);
+
   return {
     contentId,
     title,
+    ...region,
     startDate,
     endDate,
     address: { addr1, addr2 },
@@ -152,10 +178,12 @@ function festivalDoc({ listRaw, commonRaw, introRaw }) {
 async function ensureIndexes(db) {
   await db.collection("places").createIndex({ contentId: 1 }, { unique: true, name: "uniq_contentId" });
   await db.collection("places").createIndex({ location: "2dsphere" }, { name: "geo_location" });
+  await db.collection("places").createIndex({ idongCode: 1 }, { name: "idx_idongCode" });
 
   await db.collection("festivals").createIndex({ contentId: 1 }, { unique: true, name: "uniq_contentId" });
   await db.collection("festivals").createIndex({ location: "2dsphere" }, { name: "geo_location" });
   await db.collection("festivals").createIndex({ startDate: 1, endDate: 1 }, { name: "date_range" });
+  await db.collection("festivals").createIndex({ idongCode: 1 }, { name: "idx_idongCode" });
 }
 
 async function rebuildPlaces(db) {

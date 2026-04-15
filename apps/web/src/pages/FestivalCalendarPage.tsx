@@ -85,6 +85,7 @@ export function FestivalCalendarPage() {
   const [loadingCounts, setLoadingCounts] = useState(false)
   const [loadingList, setLoadingList] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState(false)
 
   const cells = useMemo(() => buildCalendarCells(year, month), [year, month])
 
@@ -114,6 +115,11 @@ export function FestivalCalendarPage() {
     return () => ac.abort()
   }, [selectedDate])
 
+  useEffect(() => {
+    // 날짜를 바꾸면 기본(2분할 + 4개 미리보기)로 복귀
+    setExpanded(false)
+  }, [selectedDate])
+
   function goMonth(delta: number) {
     const d = new Date(year, month - 1 + delta, 1)
     setYear(d.getFullYear())
@@ -135,79 +141,103 @@ export function FestivalCalendarPage() {
 
   return (
     <section className="page calendarPage">
-      <div className="calendarCard">
-        <div className="calendarHeader">
-          <button className="monthArrow" onClick={() => goMonth(-1)} aria-label="이전 달">
-            ◀
-          </button>
-          <div className="monthTitle">{monthLabel(year, month)}</div>
-          <button className="monthArrow" onClick={() => goMonth(1)} aria-label="다음 달">
-            ▶
-          </button>
-        </div>
-
-        <div className="calendarGrid">
-          {DOW_LABELS.map((l, idx) => (
-            <div key={l} className={`dowCell ${idx === 0 ? 'sun' : ''} ${idx === 6 ? 'sat' : ''}`}>
-              {l}
-            </div>
-          ))}
-
-          {cells.map((c) => {
-            const count = c.inMonth ? dayCounts.get(c.date) ?? 0 : null
-            const isSelected = c.date === selectedDate
-            const isSun = c.dow === 0
-            const isSat = c.dow === 6
-
-            return (
-              <button
-                key={c.date}
-                type="button"
-                className={[
-                  'dayCell',
-                  c.inMonth ? 'inMonth' : 'outMonth',
-                  isSelected ? 'selected' : '',
-                  isSun ? 'sun' : '',
-                  isSat ? 'sat' : '',
-                ].join(' ')}
-                onClick={() => onCellClick(c)}
-              >
-                <div className="dayNum">{c.day}</div>
-                {c.inMonth ? <div className="dayCount">{loadingCounts ? '' : `${count}개`}</div> : <div className="dayCount" />}
+      <div className={`calendarLayout ${expanded ? 'expanded' : ''}`}>
+        <section className="calendarLeft" aria-label="달력">
+          <div className="calendarCard">
+            <div className="calendarHeader">
+              <button className="monthArrow" onClick={() => goMonth(-1)} aria-label="이전 달">
+                ◀
               </button>
-            )
-          })}
-        </div>
-      </div>
+              <div className="monthTitle">{monthLabel(year, month)}</div>
+              <button className="monthArrow" onClick={() => goMonth(1)} aria-label="다음 달">
+                ▶
+              </button>
+            </div>
 
-      <div className="listSection">
-        <h2 className="sectionTitle">축제 리스트</h2>
-        {error ? <div className="error">{error}</div> : null}
+            <div className="calendarGrid" aria-label="월 달력">
+              {DOW_LABELS.map((l, idx) => (
+                <div key={l} className={`dowCell ${idx === 0 ? 'sun' : ''} ${idx === 6 ? 'sat' : ''}`}>
+                  {l}
+                </div>
+              ))}
 
-        {loadingList ? (
-          <div className="muted">불러오는 중…</div>
-        ) : festivals.length === 0 ? (
-          <div className="muted">선택한 날짜에 진행 중인 축제가 없어요.</div>
-        ) : (
-          <div className="festivalList">
-            {festivals.map((f) => (
-              <article key={f.contentId} className="festivalItem">
-                <div className="festivalThumb">
-                  {f.image ? <img src={f.image} alt="" loading="lazy" /> : <div className="thumbFallback" />}
-                </div>
-                <div className="festivalBody">
-                  <div className="festivalTitle">{f.title}</div>
-                  <div className="festivalMeta">
-                    <div className="festivalDates">
-                      {f.startDate}~{f.endDate}
-                    </div>
-                    {f.address?.addr1 ? <div className="festivalLoc">{f.address.addr1}</div> : null}
-                  </div>
-                </div>
-              </article>
-            ))}
+              {cells.map((c) => {
+                const count = c.inMonth ? dayCounts.get(c.date) ?? 0 : null
+                const isSelected = c.date === selectedDate
+                const isSun = c.dow === 0
+                const isSat = c.dow === 6
+
+                return (
+                  <button
+                    key={c.date}
+                    type="button"
+                    className={[
+                      'dayCell',
+                      c.inMonth ? 'inMonth' : 'outMonth',
+                      isSelected ? 'selected' : '',
+                      isSun ? 'sun' : '',
+                      isSat ? 'sat' : '',
+                    ].join(' ')}
+                    onClick={() => onCellClick(c)}
+                  >
+                    <div className="dayNum">{c.day}</div>
+                    {c.inMonth ? (
+                      <div className="dayCount">{loadingCounts ? '' : `${count}개`}</div>
+                    ) : (
+                      <div className="dayCount" />
+                    )}
+                  </button>
+                )
+              })}
+            </div>
           </div>
-        )}
+        </section>
+
+        <section className="calendarRight" aria-label="축제 리스트">
+          <div className="listHeader">
+            <div>
+              <h2 className="sectionTitle">축제 리스트</h2>
+              <div className="sectionSub">{selectedDate}</div>
+            </div>
+          </div>
+
+          {error ? <div className="error">{error}</div> : null}
+
+          {loadingList ? (
+            <div className="muted">불러오는 중…</div>
+          ) : festivals.length === 0 ? (
+            <div className="muted">선택한 날짜에 진행 중인 축제가 없어요.</div>
+          ) : (
+            <div className="festivalList">
+              {(expanded ? festivals : festivals.slice(0, 2)).map((f) => (
+                <article key={f.contentId} className="festivalItem">
+                  <div className="festivalThumb">
+                    {f.image ? <img src={f.image} alt="" loading="lazy" /> : <div className="thumbFallback" />}
+                  </div>
+                  <div className="festivalBody">
+                    <div className="festivalTitle" title={f.title}>
+                      {f.title}
+                    </div>
+                    <div className="festivalMeta">
+                      <div className="festivalDates">
+                        {f.startDate}~{f.endDate}
+                      </div>
+                      {f.address?.addr1 ? <div className="festivalLoc">{f.address.addr1}</div> : null}
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+
+          {!loadingList && !expanded && festivals.length > 2 ? (
+            <div className="listMoreWrap">
+              <button type="button" className="listMoreBtn" onClick={() => setExpanded(true)}>
+                더보기 ({festivals.length - 2}개)
+              </button>
+            </div>
+          ) : null}
+        </section>
       </div>
     </section>
   )

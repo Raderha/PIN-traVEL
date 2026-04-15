@@ -22,7 +22,7 @@ dotenv.config();
 const TOUR_API_BASE = "https://apis.data.go.kr/B551011/KorService2";
 const MOBILE_OS = "ETC";
 const MOBILE_APP = "pintravel";
-const REGION_LDONG_REGN_CD = "26"; // 부산 고정
+const PLACES_LDONG_REGN_CD = "26"; // 관광지: 부산 고정
 
 const DEFAULTS = {
   festivals: {
@@ -160,7 +160,6 @@ async function fetchFestivalListPage({ serviceKey, pageNo, numOfRows, eventStart
     pageNo,
     numOfRows,
     _type: "json",
-    lDongRegnCd: REGION_LDONG_REGN_CD,
   });
   const json = await fetchJson(url);
   const totalCount = Number(json?.response?.body?.totalCount ?? 0);
@@ -173,7 +172,7 @@ async function fetchPlacesListPage({ serviceKey, pageNo, numOfRows, contentTypeI
     MobileOS: MOBILE_OS,
     MobileApp: MOBILE_APP,
     _type: "json",
-    lDongRegnCd: REGION_LDONG_REGN_CD,
+    lDongRegnCd: PLACES_LDONG_REGN_CD,
     contentTypeId,
     pageNo,
     numOfRows,
@@ -331,7 +330,8 @@ async function main() {
   const concurrency = Number(process.env.TOUR_SYNC_CONCURRENCY ?? DEFAULTS.concurrency);
 
   console.log(`[sync] MongoDB=${db.databaseName}`);
-  console.log(`[sync] lDongRegnCd=${REGION_LDONG_REGN_CD} (Busan)`);
+  console.log(`[sync] festivalsRegion=ALL`);
+  console.log(`[sync] placesRegion=lDongRegnCd=${PLACES_LDONG_REGN_CD} (Busan)`);
   console.log(`[sync] concurrency=${concurrency}`);
 
   await syncKind({

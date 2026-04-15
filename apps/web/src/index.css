@@ -94,6 +94,11 @@ p {
   max-width: 100%;
 }
 
+/* calendar page: reduce outer whitespace */
+.appMain:has(.calendarPage) {
+  padding: 12px 12px 16px;
+}
+
 .card {
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -584,98 +589,138 @@ input:focus {
 
 /* calendar */
 .calendarPage {
+  width: min(1400px, 100%);
+  max-width: 100%;
+}
+
+.calendarLayout {
   display: flex;
   flex-direction: column;
   gap: 18px;
 }
 
+.calendarLeft,
+.calendarRight {
+  min-width: 0;
+}
+
+.calendarLeft {
+  display: flex;
+  flex-direction: column;
+}
+
+.calendarRight {
+  display: flex;
+  flex-direction: column;
+}
+
+.calendarLayout.expanded {
+  /* layout stays vertical; only list length changes */
+}
+
 .calendarCard {
-  border: 1px solid #bcd5ff;
-  border-radius: 12px;
-  background: white;
-  padding: 14px;
+  border: none;
+  border-radius: 18px;
+  background: transparent;
+  padding: 10px 6px 4px;
+  box-shadow: none;
+  flex: 1 1 auto;
 }
 
 .calendarHeader {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  margin-bottom: 10px;
+  gap: 14px;
+  margin-bottom: 14px;
 }
 
 .monthTitle {
   font-weight: 800;
-  color: #111827;
+  color: var(--text-h);
   font-size: 22px;
+  letter-spacing: -0.5px;
 }
 
 .monthArrow {
   border: none;
   background: transparent;
-  font-size: 20px;
+  font-size: 18px;
   cursor: pointer;
-  padding: 6px 10px;
-  border-radius: 10px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  color: var(--text-h);
+  transition: transform 0.12s ease, background 0.12s ease, opacity 0.12s ease;
 }
 
 .monthArrow:hover {
-  background: #eff6ff;
+  background: color-mix(in oklab, #0b5fff 8%, transparent);
+  transform: translateY(-1px);
 }
 
 .calendarGrid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 0;
-  border-top: 2px solid #9cc3ff;
-  border-left: 2px solid #9cc3ff;
+  gap: 6px;
+  border: none;
+  border-radius: 18px;
+  overflow: visible;
+  padding: 6px 2px 2px;
 }
 
 .dowCell {
-  padding: 10px 0;
-  font-weight: 700;
-  background: #f8fbff;
-  border-right: 2px solid #9cc3ff;
-  border-bottom: 2px solid #9cc3ff;
-  color: #111827;
+  padding: 10px 0 6px;
+  font-weight: 800;
+  background: transparent;
+  border: none;
+  color: color-mix(in oklab, var(--text-h) 85%, var(--bg));
   text-align: center;
+  font-size: 12px;
+  letter-spacing: 0.08em;
 }
 
 .dowCell.sun {
-  color: #ef4444;
+  color: #10b981;
 }
 
 .dayCell {
-  height: 78px;
+  height: 74px;
   border: none;
   cursor: pointer;
-  background: white;
-  border-right: 2px solid #9cc3ff;
-  border-bottom: 2px solid #9cc3ff;
+  background: transparent;
+  border-radius: 18px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  padding: 6px 0;
+  gap: 6px;
+  padding: 8px 0;
+  transition: background 0.12s ease, transform 0.12s ease, box-shadow 0.12s ease, color 0.12s ease;
 }
 
 .dayCell:hover {
-  background: #f2f8ff;
+  background: color-mix(in oklab, #0b5fff 6%, transparent);
 }
 
 .dayCell.selected {
-  background: #0b5fff;
+  background: #10b981;
+  box-shadow: none;
 }
 
 .dayNum {
   font-weight: 800;
-  font-size: 22px;
-  color: #111827;
+  font-size: 18px;
+  color: var(--text-h);
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
 }
 
-.dayCell.sun .dayNum {
-  color: #ef4444;
+.dayCell.selected .dayNum {
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
 }
 
 .dayCell.outMonth .dayNum {
@@ -684,46 +729,80 @@ input:focus {
 }
 
 .dayCount {
-  font-size: 14px;
-  font-weight: 700;
-  color: #111827;
+  font-size: 12px;
+  font-weight: 800;
+  color: color-mix(in oklab, var(--text) 80%, var(--bg));
 }
 
-.dayCell.selected .dayNum,
 .dayCell.selected .dayCount {
   color: white;
 }
 
-.listSection {
-  width: 980px;
-  max-width: 100%;
+.calendarRight {
+  border: none;
+  border-radius: 18px;
+  background: transparent;
+  padding: 10px 6px 4px;
+  box-shadow: none;
+  flex: 1 1 auto;
+}
+
+.listHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
 }
 
 .sectionTitle {
   margin: 0 0 10px;
-  font-size: 24px;
+  font-size: 22px;
   letter-spacing: -0.3px;
+}
+
+.calendarRight .sectionTitle {
+  margin-bottom: 2px;
+}
+
+.sectionSub {
+  font-size: 13px;
+  font-weight: 800;
+  color: color-mix(in oklab, var(--text) 80%, var(--bg));
 }
 
 .festivalList {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: 14px;
+}
+
+.calendarLayout.expanded .festivalList {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .festivalItem {
   display: flex;
-  border: 1px solid #bcd5ff;
-  border-radius: 12px;
+  border: none;
+  border-radius: 18px;
   overflow: hidden;
-  background: white;
-  min-height: 88px;
+  background: color-mix(in oklab, var(--bg) 92%, white);
+  min-height: 110px;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.festivalItem:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.10);
 }
 
 .festivalThumb {
-  width: 140px;
+  width: 190px;
   flex: 0 0 auto;
   background: #f3f4f6;
+  aspect-ratio: 4 / 5;
+  border-radius: 14px;
+  overflow: hidden;
 }
 
 .festivalThumb img {
@@ -747,18 +826,42 @@ input:focus {
   min-width: 0;
 }
 
+.listMoreWrap {
+  margin-top: 14px;
+  display: flex;
+  justify-content: center;
+}
+
+.listMoreBtn {
+  border: none;
+  cursor: pointer;
+  padding: 12px 16px;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 800;
+  color: #0b5fff;
+  background: color-mix(in oklab, #0b5fff 10%, transparent);
+}
+
+.listMoreBtn:hover {
+  background: color-mix(in oklab, #0b5fff 14%, transparent);
+}
+
 .festivalTitle {
   font-weight: 900;
-  color: #111827;
+  color: var(--text-h);
   font-size: 16px;
   line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .festivalMeta {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  color: #111827;
+  color: color-mix(in oklab, var(--text-h) 85%, var(--bg));
   font-size: 14px;
   font-weight: 700;
 }
@@ -768,18 +871,19 @@ input:focus {
 }
 
 .festivalLoc {
-  color: #374151;
+  color: color-mix(in oklab, var(--text) 85%, var(--bg));
 }
 
 @media (max-width: 820px) {
-  .festivalList {
+  .festivalList,
+  .calendarLayout.expanded .festivalList {
     grid-template-columns: 1fr;
   }
   .dayCell {
-    height: 64px;
+    height: 72px;
   }
   .dayNum {
-    font-size: 18px;
+    font-size: 16px;
   }
 }
 
