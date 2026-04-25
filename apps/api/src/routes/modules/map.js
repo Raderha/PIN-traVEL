@@ -14,5 +14,176 @@
  * - 인증: 공개 조회만이면 미들웨어 없이, 사용자별 저장 핀이 생기면 `security/auth.js`의 `requireAuth` 패턴을 sessions 라우터 참고.
  */
 import { Router } from "express";
+import { z } from "zod";
+
+import { getMongoDb } from "../../storage/mongo.js";
 
 export const mapRouter = Router();
+
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "YYYY-MM-DD");
+
+function collection(name) {
+  return getMongoDb().collection(name);
+}
+
+function regionQueryForRegion(region) {
+  if (region === "busan") {
+    return {
+      $or: [{ "idong.regnCd": "26" }, { idongCode: /^26/ }],
+      "location.coordinates": { $exists: true },
+    };
+  }
+  return null;
+}
+
+function pointFromLocation(location) {
+  const coordinates = location?.coordinates;
+  if (!Array.isArray(coordinates)) return null;
+  const [lng, lat] = coordinates;
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
+  return { lat, lng };
+}
+
+function festivalSummaryPin(f) {
+  const point = pointFromLocation(f.location);
+  if (!point) return null;
+
+  return {
+    id: `festival:${f.contentId}`,
+    contentId: f.contentId,
+    kind: "festival",
+    iconType: "festival",
+    title: f.title,
+    subtitle: f.eventPlace ?? f.address?.addr1 ?? null,
+    address: f.address ?? null,
+    image: f.image ?? null,
+    summary: {
+      fee: f.fee ?? null,
+      time: f.useTime ?? null,
+      startDate: f.startDate ?? null,
+      endDate: f.endDate ?? null,
+    },
+    location: point,
+  };
+}
+
+function placeIconType(place) {
+  const cat3 = place.category?.cat3;
+  if (cat3 === "A02010100" || cat3 === "A02010200") return "palace";
+  return "natural";
+}
+
+function placeSummaryPin(place) {
+  const point = pointFromLocation(place.location);
+  if (!point) return null;
+
+  return {
+    id: `tour:${place.contentId}`,
+    contentId: place.contentId,
+    kind: "tour",
+    iconType: placeIconType(place),
+    title: place.title,
+    subtitle: place.address?.addr1 ?? null,
+    address: place.address ?? null,
+    image: place.image ?? null,
+    summary: {
+      fee: place.fee ?? null,
+      time: place.useTime ?? null,
+      restDate: place.restDate ?? null,
+    },
+    location: point,
+  };
+}
+
+// UC4: 지도용 정보 요약형 핀 데이터. 프론트는 이 응답을 핀 템플릿/아이콘 assets와 결합해 지도에 렌더링한다.
+mapRouter.get("/summary-pins", async (req, res) => {
+  const parsed = z
+    .object({
+      kind: z.enum(["all", "festival", "tour"]).optional(),
+      region: z.enum(["busan"]).optional(),
+      date: isoDate.optional(),
+      from: isoDate.optional(),
+      to: isoDate.optional(),
+      limit: z.coerce.number().int().min(1).max(100).optional(),
+    })
+    .safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ ok: false, error: "INVALID_QUERY" });
+
+  const kind = parsed.data.kind ?? "all";
+  const region = parsed.data.region ?? "busan";
+  const date = parsed.data.date ?? null;
+  const rangeFrom = parsed.data.from ?? null;
+  const rangeTo = parsed.data.to ?? null;
+  const limit = parsed.data.limit ?? 40;
+  const regionQuery = regionQueryForRegion(region);
+  if (!regionQuery) return res.status(400).json({ ok: false, error: "UNSUPPORTED_REGION" });
+
+  const pins = [];
+
+  if (kind === "all" || kind === "festival") {
+    const festivalLimit = kind === "all" ? Math.ceil(limit / 2) : limit;
+    const dateQuery = date
+      ? { startDate: { $lte: date }, endDate: { $gte: date } }
+      : rangeFrom && rangeTo
+        ? { startDate: { $lte: rangeTo }, endDate: { $gte: rangeFrom } }
+        : {};
+    const festivalQuery = {
+      ...regionQuery,
+      ...dateQuery,
+    };
+
+    const festivals = await collection("festivals")
+      .find(
+        festivalQuery,
+        {
+          projection: {
+            _id: 0,
+            contentId: 1,
+            title: 1,
+            startDate: 1,
+            endDate: 1,
+            address: 1,
+            location: 1,
+            image: 1,
+            eventPlace: 1,
+            useTime: 1,
+            fee: 1,
+          },
+        }
+      )
+      .sort({ endDate: 1, startDate: 1, title: 1 })
+      .limit(festivalLimit)
+      .toArray();
+    pins.push(...festivals.map(festivalSummaryPin).filter(Boolean));
+  }
+
+  if (kind === "all" || kind === "tour") {
+    const remaining = Math.max(limit - pins.length, 0);
+    if (remaining > 0) {
+      const places = await collection("places")
+        .find(
+          regionQuery,
+          {
+            projection: {
+              _id: 0,
+              contentId: 1,
+              title: 1,
+              category: 1,
+              address: 1,
+              location: 1,
+              image: 1,
+              useTime: 1,
+              restDate: 1,
+              fee: 1,
+            },
+          }
+        )
+        .sort({ title: 1 })
+        .limit(remaining)
+        .toArray();
+      pins.push(...places.map(placeSummaryPin).filter(Boolean));
+    }
+  }
+
+  return res.json({ ok: true, region, date, from: rangeFrom, to: rangeTo, pins });
+});

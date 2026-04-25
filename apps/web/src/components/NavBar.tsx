@@ -29,12 +29,12 @@ export function NavBar() {
             축제 달력
           </NavLink>
 
-          <a className="navItem disabled" aria-disabled="true">
+          <NavLink to="/map" className={({ isActive }) => `navItem ${isActive ? 'active' : ''}`}>
             <span className="navIcon" aria-hidden="true">
               🗺️
             </span>
             지도
-          </a>
+          </NavLink>
         </div>
 
         <div className="navRight">
@@ -50,6 +50,62 @@ export function NavBar() {
         </div>
       </nav>
       <div className="navDivider" />
+    </header>
+  )
+}
+
+export function MapNavBar() {
+  const nav = useNavigate()
+  const token = typeof window !== 'undefined' ? localStorage.getItem('pintravel_token') : null
+
+  function onLogout() {
+    localStorage.removeItem('pintravel_token')
+    localStorage.removeItem('pintravel_user')
+    nav('/', { replace: true })
+  }
+
+  function onToggleFestivalFilter() {
+    window.dispatchEvent(new Event('pintravel:toggle-festival-filter'))
+  }
+
+  return (
+    <header className="mapNavWrap">
+      <nav className="mapNav">
+        <Link className="brand mapBrand" to="/">
+          <img className="brandLogo" src={logoUrl} alt="PIN-TRAVEL" />
+        </Link>
+
+        <div className="mapNavControls">
+          <button className="mapFilterToggle" type="button" onClick={onToggleFestivalFilter}>
+            축제 필터링 <span aria-hidden="true">⌃</span>
+          </button>
+
+          <div className="mapSearch">
+            <span className="mapSearchMenu" aria-hidden="true">
+              ☰
+            </span>
+            <input aria-label="지도 검색" placeholder="어디로 떠나볼까요?" />
+            <span className="mapSearchIcon" aria-hidden="true">
+              ⌕
+            </span>
+          </div>
+        </div>
+
+        <div className="mapNavRight">
+          {token ? (
+            <button type="button" className="navItem navBtn" onClick={onLogout}>
+              로그아웃
+            </button>
+          ) : (
+            <NavLink to="/login" className={({ isActive }) => `navItem ${isActive ? 'active' : ''}`}>
+              로그인
+            </NavLink>
+          )}
+          <button type="button" className="navItem navBtn">
+            세션 생성
+          </button>
+        </div>
+      </nav>
     </header>
   )
 }

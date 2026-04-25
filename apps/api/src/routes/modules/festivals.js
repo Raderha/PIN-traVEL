@@ -61,6 +61,50 @@ function festivalListItem(f) {
   };
 }
 
+function todayIsoDate() {
+  const now = new Date();
+  return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+}
+
+// 메인 페이지: 오늘 기준 진행 중인 축제 중 우선 노출할 목록
+festivalsRouter.get("/main/active", async (req, res) => {
+  const parsed = z
+    .object({
+      date: isoDate.optional(),
+      limit: z.coerce.number().int().min(1).max(12).optional(),
+    })
+    .safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ ok: false, error: "INVALID_QUERY" });
+
+  const date = parsed.data.date ?? todayIsoDate();
+  const limit = parsed.data.limit ?? 6;
+  const festivals = await festivalsCol()
+    .find(
+      { startDate: { $lte: date }, endDate: { $gte: date } },
+      {
+        projection: {
+          _id: 0,
+          contentId: 1,
+          title: 1,
+          startDate: 1,
+          endDate: 1,
+          address: 1,
+          location: 1,
+          image: 1,
+          tel: 1,
+          overview: 1,
+          eventPlace: 1,
+          useTime: 1,
+          fee: 1,
+        },
+      }
+    )
+    .sort({ endDate: 1, startDate: 1, title: 1 })
+    .limit(limit)
+    .toArray();
+  return res.json({ ok: true, date, festivals: festivals.map(festivalListItem) });
+});
+
 // UC8: 달력 그리드 — 각 일자별 '그날 진행 중인 축제' 개수(03-01~03-12 축제는 1~12일 count에 반영, 해당 일 선택 시 /calendar/day에도 동일)
 festivalsRouter.get("/calendar/day-counts", async (req, res) => {
   const parsed = z
