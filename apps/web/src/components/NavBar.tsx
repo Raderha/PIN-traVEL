@@ -1,5 +1,7 @@
+import { useState } from 'react'
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 import logoUrl from '../assets/logo.png'
+import { createSession } from '../lib/api'
 
 export function NavBar() {
   const nav = useNavigate()
@@ -57,6 +59,9 @@ export function NavBar() {
 export function MapNavBar() {
   const nav = useNavigate()
   const token = typeof window !== 'undefined' ? localStorage.getItem('pintravel_token') : null
+  const [sessionUrl, setSessionUrl] = useState<string | null>(null)
+  const [creatingSession, setCreatingSession] = useState(false)
+  const [sessionError, setSessionError] = useState<string | null>(null)
 
   function onLogout() {
     localStorage.removeItem('pintravel_token')
@@ -66,6 +71,29 @@ export function MapNavBar() {
 
   function onToggleFestivalFilter() {
     window.dispatchEvent(new Event('pintravel:toggle-festival-filter'))
+  }
+
+  async function onCreateSession() {
+    if (!token) {
+      nav('/login')
+      return
+    }
+
+    setCreatingSession(true)
+    setSessionError(null)
+    try {
+      const r = await createSession()
+      setSessionUrl(`${window.location.origin}/map?session=${encodeURIComponent(r.sessionId)}`)
+    } catch {
+      setSessionError('세션 생성에 실패했어요.')
+    } finally {
+      setCreatingSession(false)
+    }
+  }
+
+  async function onCopySessionUrl() {
+    if (!sessionUrl) return
+    await navigator.clipboard?.writeText(sessionUrl)
   }
 
   return (
@@ -101,11 +129,33 @@ export function MapNavBar() {
               로그인
             </NavLink>
           )}
-          <button type="button" className="navItem navBtn">
-            세션 생성
+          <button type="button" className="navItem navBtn" onClick={onCreateSession} disabled={creatingSession}>
+            {creatingSession ? '생성 중' : '세션 생성'}
           </button>
         </div>
       </nav>
+      {sessionUrl ? (
+        <div className="sessionModalBackdrop" role="presentation">
+          <div className="sessionModal" role="dialog" aria-modal="true" aria-label="세션 생성 성공">
+            <div className="sessionModalCheck" aria-hidden="true">✓</div>
+            <h2>세션 생성 성공</h2>
+            <div className="sessionUrlBox">{sessionUrl}</div>
+            <div className="sessionModalActions">
+              <button type="button" onClick={onCopySessionUrl}>
+                복사하기
+              </button>
+              <button type="button" onClick={() => setSessionUrl(null)}>
+                확인
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {sessionError ? (
+        <div className="sessionToast" role="status">
+          {sessionError}
+        </div>
+      ) : null}
     </header>
   )
 }

@@ -56,6 +56,12 @@ function pick(obj, keys) {
   return null;
 }
 
+function firstTourApiItem(raw) {
+  const item = raw?.response?.body?.items?.item;
+  if (!item) return raw ?? null;
+  return Array.isArray(item) ? item[0] ?? null : item;
+}
+
 function toIsoDateMaybe(compact) {
   // TourAPI는 보통 YYYYMMDD. 이미 YYYY-MM-DD면 그대로 유지.
   const s = asString(compact);
@@ -92,45 +98,57 @@ function regionFromRaw(listRaw) {
   };
 }
 
-function placeDoc({ listRaw, commonRaw, introRaw }) {
+function placeDoc({ listRaw, commonRaw, introRaw, source }) {
+  const common = firstTourApiItem(commonRaw);
+  const intro = firstTourApiItem(introRaw);
   const contentId = asString(pick(listRaw, ["contentid", "contentId"])) ?? asString(listRaw?.contentId);
   if (!contentId) return null;
 
-  const title = asString(pick(listRaw, ["title"]));
-  const mapx = pick(listRaw, ["mapx"]);
-  const mapy = pick(listRaw, ["mapy"]);
-  const addr1 = asString(pick(listRaw, ["addr1"]));
-  const addr2 = asString(pick(listRaw, ["addr2"]));
-  const firstimage = asString(pick(listRaw, ["firstimage", "firstimage2"]));
-  const tel = asString(pick(listRaw, ["tel"]));
-  const cat1 = asString(pick(listRaw, ["cat1"]));
-  const cat2 = asString(pick(listRaw, ["cat2"]));
-  const cat3 = asString(pick(listRaw, ["cat3"]));
+  const contentTypeId = asString(pick(listRaw, ["contenttypeid", "contentTypeId"])) ?? asString(pick(common, ["contenttypeid", "contentTypeId"]));
+  const title = asString(pick(common, ["title"])) ?? asString(pick(listRaw, ["title"]));
+  const mapx = pick(listRaw, ["mapx"]) ?? pick(common, ["mapx"]);
+  const mapy = pick(listRaw, ["mapy"]) ?? pick(common, ["mapy"]);
+  const addr1 = asString(pick(common, ["addr1"])) ?? asString(pick(listRaw, ["addr1"]));
+  const addr2 = asString(pick(common, ["addr2"])) ?? asString(pick(listRaw, ["addr2"]));
+  const firstimage = asString(pick(listRaw, ["firstimage"])) ?? asString(pick(common, ["firstimage"]));
+  const firstimage2 = asString(pick(listRaw, ["firstimage2"])) ?? asString(pick(common, ["firstimage2"]));
+  const tel = asString(pick(common, ["tel"])) ?? asString(pick(listRaw, ["tel"]));
+  const cat1 = asString(pick(common, ["cat1"])) ?? asString(pick(listRaw, ["cat1"]));
+  const cat2 = asString(pick(common, ["cat2"])) ?? asString(pick(listRaw, ["cat2"]));
+  const cat3 = asString(pick(common, ["cat3"])) ?? asString(pick(listRaw, ["cat3"]));
+  const zipcode = asString(pick(common, ["zipcode"])) ?? asString(pick(listRaw, ["zipcode"]));
 
-  const overview = asString(pick(commonRaw, ["overview"])) ?? asString(pick(introRaw, ["overview"]));
+  const overview = asString(pick(common, ["overview"])) ?? asString(pick(intro, ["overview"]));
 
   // 운영정보 필드는 commonRaw/introRaw 어느 쪽에 있을지 몰라서 둘 다 탐색
-  const usetime = asString(pick(commonRaw, ["usetime"])) ?? asString(pick(introRaw, ["usetime"]));
-  const restdate = asString(pick(commonRaw, ["restdate"])) ?? asString(pick(introRaw, ["restdate"]));
-  const parking = asString(pick(commonRaw, ["parking"])) ?? asString(pick(introRaw, ["parking"]));
-  const usefee = asString(pick(commonRaw, ["usefee"])) ?? asString(pick(introRaw, ["usefee"]));
+  const infocenter = asString(pick(common, ["infocenter"])) ?? asString(pick(intro, ["infocenter"]));
+  const usetime = asString(pick(common, ["usetime"])) ?? asString(pick(intro, ["usetime"]));
+  const restdate = asString(pick(common, ["restdate"])) ?? asString(pick(intro, ["restdate"]));
+  const parking = asString(pick(common, ["parking"])) ?? asString(pick(intro, ["parking"]));
+  const usefee = asString(pick(common, ["usefee"])) ?? asString(pick(intro, ["usefee"]));
 
   const region = regionFromRaw(listRaw);
+  if (region.idong?.regnCd !== "26" && !region.idongCode?.startsWith("26")) return null;
 
   return {
     contentId,
+    contentTypeId,
     title,
     ...region,
     category: { cat1, cat2, cat3 },
     address: { addr1, addr2 },
+    zipcode,
     location: pointFromMapXY(mapx, mapy),
     image: firstimage,
+    images: { firstimage, firstimage2 },
     tel,
+    infoCenter: infocenter,
     overview,
     useTime: usetime,
     restDate: restdate,
     parking,
     fee: usefee,
+    source,
   };
 }
 
@@ -191,7 +209,16 @@ async function rebuildPlaces(db) {
   const placeDetailsCol = db.collection("place_details_raw");
   const placesCol = db.collection("places");
 
-  const cursor = placesRawCol.find({}, { projection: { contentId: 1, raw: 1 } });
+  const cursor = placesRawCol.find(
+    {
+      $or: [
+        { "raw.lDongRegnCd": "26" },
+        { "raw.ldongregncd": "26" },
+        { "raw.l_dong_regn_cd": "26" },
+      ],
+    },
+    { projection: { contentId: 1, raw: 1, contentTypeId: 1, source: 1 } }
+  );
   let processed = 0;
   let written = 0;
   const ops = [];
@@ -202,8 +229,16 @@ async function rebuildPlaces(db) {
     const listRaw = row.raw ?? null;
     if (!contentId || !listRaw) continue;
 
-    const details = await placeDetailsCol.findOne({ contentId }, { projection: { commonRaw: 1, introRaw: 1 } });
-    const doc = placeDoc({ listRaw, commonRaw: details?.commonRaw ?? null, introRaw: details?.introRaw ?? null });
+    const details = await placeDetailsCol.findOne({ contentId }, { projection: { commonRaw: 1, introRaw: 1, source: 1 } });
+    const doc = placeDoc({
+      listRaw,
+      commonRaw: details?.commonRaw ?? null,
+      introRaw: details?.introRaw ?? null,
+      source: {
+        list: row.source ?? null,
+        details: details?.source ?? null,
+      },
+    });
     if (!doc) continue;
 
     ops.push({

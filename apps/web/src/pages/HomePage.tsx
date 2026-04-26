@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import festivalIconUrl from '../assets/festival.png'
 import naturalIconUrl from '../assets/natural.png'
 import palaceIconUrl from '../assets/palace.png'
+import festivalPinTemplateUrl from '../assets/pin_festival.png'
 import pinTemplateUrl from '../assets/pin.png'
 import { fetchMainFestivals, fetchMapSummaryPins, type FestivalListItem, type SummaryPin } from '../lib/api'
 
@@ -99,6 +100,10 @@ function iconUrlForPin(pin: SummaryPin) {
   return naturalIconUrl
 }
 
+function pinTemplateUrlForPin(pin: SummaryPin) {
+  return pin.iconType === 'festival' ? festivalPinTemplateUrl : pinTemplateUrl
+}
+
 function compactText(value: string | null | undefined, fallback: string) {
   const trimmed = value?.replace(/\s+/g, ' ').trim()
   return trimmed || fallback
@@ -120,7 +125,7 @@ function createSummaryPinContent(pin: SummaryPin) {
   const fee = escapeHtml(compactText(pin.summary.fee, '요금 정보 없음'))
   const summary = escapeHtml(summaryLineForPin(pin))
   const iconUrl = escapeHtml(iconUrlForPin(pin))
-  const pinUrl = escapeHtml(pinTemplateUrl)
+  const pinUrl = escapeHtml(pinTemplateUrlForPin(pin))
 
   return `
     <div class="summaryPinMarker" style="background-image: url('${pinUrl}')">

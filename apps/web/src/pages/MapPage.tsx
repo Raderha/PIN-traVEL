@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import festivalIconUrl from '../assets/festival.png'
 import naturalIconUrl from '../assets/natural.png'
 import palaceIconUrl from '../assets/palace.png'
+import festivalPinTemplateUrl from '../assets/pin_festival.png'
 import pinTemplateUrl from '../assets/pin.png'
 import { fetchMapSummaryPins, type SummaryPin } from '../lib/api'
 
@@ -40,12 +41,13 @@ type NaverMaps = {
 
 const BUSAN_CENTER = { lat: 35.1796, lng: 129.0756 }
 const SINGLE_CLUSTER_MAX_ZOOM = 10
-const CLUSTER_UNLOCK_ZOOM = 17
+const CLUSTER_UNLOCK_ZOOM = 16
 const NAVER_MAP_SCRIPT_ID = 'naver-map-script'
 const NAVER_MAP_KEY_ID = import.meta.env.VITE_X_NCP_APIGW_API_KEY_ID
 const FILTER_YEAR = 2026
 const FILTER_MONTH = 4
 const FILTER_DAYS = 30
+const CART_STORAGE_KEY = 'pintravel_map_cart_days'
 
 let naverMapScriptPromise: Promise<void> | null = null
 
@@ -105,10 +107,36 @@ function addressText(pin: SummaryPin) {
   return [addr1, addr2].filter(Boolean).join(' ') || compactText(pin.subtitle, '주소 정보 없음')
 }
 
+function formatDbText(value: string | null | undefined, fallback: string) {
+  const text = compactText(value, fallback).replace(/<br\s*\/?>/gi, '\n')
+  return text.replace(/^(가능|불가|없음)\s*요금\s*\(([^)]+)\)$/u, '$1\n요금: $2')
+}
+
+function detailImageUrl(pin: SummaryPin) {
+  return pin.image ?? pin.images?.firstimage ?? pin.images?.firstimage2 ?? null
+}
+
+function placeLabel(pin: SummaryPin) {
+  if (pin.kind === 'festival') return compactText(pin.detail?.eventPlace, '행사장 정보 없음')
+  return formatDbText(pin.detail?.parking, '주차 정보 없음')
+}
+
+function contactText(pin: SummaryPin) {
+  return compactText(pin.tel ?? pin.infoCenter, '문의 정보 없음')
+}
+
+function overviewText(pin: SummaryPin) {
+  return compactText(pin.overview, '상세 설명 정보 없음')
+}
+
 function iconUrlForPin(pin: SummaryPin) {
   if (pin.iconType === 'festival') return festivalIconUrl
   if (pin.iconType === 'palace') return palaceIconUrl
   return naturalIconUrl
+}
+
+function pinTemplateUrlForPin(pin: SummaryPin) {
+  return pin.iconType === 'festival' ? festivalPinTemplateUrl : pinTemplateUrl
 }
 
 function createSummaryPinContent(pin: SummaryPin) {
@@ -116,7 +144,7 @@ function createSummaryPinContent(pin: SummaryPin) {
   const fee = escapeHtml(compactText(pin.summary.fee, '요금 정보 없음'))
   const dateRange = escapeHtml(summaryDateRange(pin))
   const iconUrl = escapeHtml(iconUrlForPin(pin))
-  const pinUrl = escapeHtml(pinTemplateUrl)
+  const pinUrl = escapeHtml(pinTemplateUrlForPin(pin))
 
   return `
     <div class="summaryPinMarker" style="background-image: url('${pinUrl}')">
@@ -235,6 +263,35 @@ function loadNaverMapScript() {
 }
 
 const FILTERS = ['전체', '역사/문화', '축제', '시장/쇼핑', '전시/문화시설', '자연/공원'] as const
+type MapCategory = (typeof FILTERS)[number] | '기타'
+const MAP_FILTERS: MapCategory[] = [...FILTERS, '기타']
+
+function categoryForPin(pin: SummaryPin): MapCategory {
+  if (pin.kind === 'festival') return '축제'
+
+  const cat1 = pin.detail?.category?.cat1
+  const cat2 = pin.detail?.category?.cat2
+  if (!cat1 || !cat2) return '기타'
+
+  if (cat1 === 'A02' && ['A0201', 'A0205', 'A0206'].includes(cat2)) return '역사/문화'
+  if (cat1 === 'A04' && ['A0401', 'A0402'].includes(cat2)) return '시장/쇼핑'
+  if (cat1 === 'A02' && ['A0202', 'A0203'].includes(cat2)) return '전시/문화시설'
+  if (cat1 === 'A01' && ['A0101', 'A0102'].includes(cat2)) return '자연/공원'
+
+  return '기타'
+}
+
+function loadStoredCartDays() {
+  if (typeof window === 'undefined') return [[]] as SummaryPin[][]
+  try {
+    const raw = localStorage.getItem(CART_STORAGE_KEY)
+    if (!raw) return [[]] as SummaryPin[][]
+    const parsed = JSON.parse(raw) as SummaryPin[][]
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : ([[]] as SummaryPin[][])
+  } catch {
+    return [[]] as SummaryPin[][]
+  }
+}
 
 export function MapPage() {
   const mapElementRef = useRef<HTMLDivElement | null>(null)
@@ -244,6 +301,10 @@ export function MapPage() {
   const markerListenersRef = useRef<NaverEventListener[]>([])
   const [summaryPins, setSummaryPins] = useState<SummaryPin[]>([])
   const [selectedPin, setSelectedPin] = useState<SummaryPin | null>(null)
+  const [cartDays, setCartDays] = useState<SummaryPin[][]>(() => loadStoredCartDays())
+  const [activeCartDay, setActiveCartDay] = useState(0)
+  const [draggingPin, setDraggingPin] = useState<{ dayIndex: number; pinId: string } | null>(null)
+  const [selectedCategories, setSelectedCategories] = useState<MapCategory[]>(['전체'])
   const [calendarOpen, setCalendarOpen] = useState(false)
   const [festivalFilterEnabled, setFestivalFilterEnabled] = useState(false)
   const [filterRange, setFilterRange] = useState({ from: toIsoDate(1), to: toIsoDate(FILTER_DAYS) })
@@ -253,6 +314,31 @@ export function MapPage() {
 
   const selectedRange = useMemo(() => (selectedPin ? summaryDateRange(selectedPin) : null), [selectedPin])
   const filterRangeLabel = useMemo(() => rangeLabel(filterRange.from, filterRange.to), [filterRange])
+  const cartPins = useMemo(() => cartDays.flat(), [cartDays])
+  const hasCartContent = cartPins.length > 0
+  const filteredSummaryPins = useMemo(() => {
+    if (selectedCategories.includes('전체')) return summaryPins
+    return summaryPins.filter((pin) => selectedCategories.includes(categoryForPin(pin)))
+  }, [selectedCategories, summaryPins])
+  const itineraryDraft = useMemo(
+    () => ({
+      days: cartDays.map((pins, dayIndex) => ({
+        day: dayIndex + 1,
+        items: pins.map((pin, order) => ({
+          order,
+          id: pin.id,
+          contentId: pin.contentId,
+          kind: pin.kind,
+          title: pin.title,
+        })),
+      })),
+    }),
+    [cartDays],
+  )
+
+  useEffect(() => {
+    localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(cartDays))
+  }, [cartDays])
 
   useEffect(() => {
     const ac = new AbortController()
@@ -290,6 +376,64 @@ export function MapPage() {
       if (range.from !== range.to) return { from: date, to: date }
       return date < range.from ? { from: date, to: range.from } : { from: range.from, to: date }
     })
+  }
+
+  function toggleCategory(category: MapCategory) {
+    setSelectedCategories((selected) => {
+      if (category === '전체') return ['전체']
+      const withoutAll = selected.filter((item) => item !== '전체')
+      const next = withoutAll.includes(category)
+        ? withoutAll.filter((item) => item !== category)
+        : [...withoutAll, category]
+      return next.length > 0 ? next : ['전체']
+    })
+  }
+
+  function addSelectedPinToCart() {
+    if (!selectedPin) return
+    setCartDays((days) => {
+      if (days.some((day) => day.some((pin) => pin.id === selectedPin.id))) return days
+      return days.map((day, index) => (index === activeCartDay ? [...day, selectedPin] : day))
+    })
+  }
+
+  function removePinFromCart(dayIndex: number, pinId: string) {
+    setCartDays((days) => days.map((day, index) => (index === dayIndex ? day.filter((pin) => pin.id !== pinId) : day)))
+  }
+
+  function addCartDay() {
+    const nextDayIndex = cartDays.length
+    setCartDays((days) => [...days, []])
+    setActiveCartDay(nextDayIndex)
+  }
+
+  function removeCartDay(dayIndex: number) {
+    if (dayIndex === 0) return
+    setCartDays((days) => days.filter((_, index) => index !== dayIndex))
+    setActiveCartDay((activeDay) => {
+      if (activeDay === dayIndex) return Math.max(0, dayIndex - 1)
+      if (activeDay > dayIndex) return activeDay - 1
+      return activeDay
+    })
+  }
+
+  function moveCartPin(targetDayIndex: number, targetPinId?: string) {
+    if (!draggingPin) return
+
+    setCartDays((days) => {
+      const sourceDay = days[draggingPin.dayIndex] ?? []
+      const movingPin = sourceDay.find((pin) => pin.id === draggingPin.pinId)
+      if (!movingPin) return days
+
+      const withoutMovingPin = days.map((day) => day.filter((pin) => pin.id !== draggingPin.pinId))
+      const targetDay = [...(withoutMovingPin[targetDayIndex] ?? [])]
+      const insertIndex = targetPinId ? targetDay.findIndex((pin) => pin.id === targetPinId) : targetDay.length
+      targetDay.splice(insertIndex >= 0 ? insertIndex : targetDay.length, 0, movingPin)
+
+      return withoutMovingPin.map((day, index) => (index === targetDayIndex ? targetDay : day))
+    })
+    setActiveCartDay(targetDayIndex)
+    setDraggingPin(null)
   }
 
   useEffect(() => {
@@ -337,7 +481,7 @@ export function MapPage() {
 
     function visiblePins() {
       const bounds = mapInstance.getBounds()
-      return summaryPins.filter((pin) => bounds.hasLatLng(new maps.LatLng(pin.location.lat, pin.location.lng)))
+      return filteredSummaryPins.filter((pin) => bounds.hasLatLng(new maps.LatLng(pin.location.lat, pin.location.lng)))
     }
 
     function renderMarkers() {
@@ -431,15 +575,20 @@ export function MapPage() {
       markerListenersRef.current = []
       clearMarkers()
     }
-  }, [summaryPins, mapReady])
+  }, [filteredSummaryPins, mapReady])
 
   return (
     <section className="mapPage">
       <div ref={mapElementRef} className="mapCanvas" />
 
       <div className="mapFilterChips" aria-label="카테고리 필터">
-        {FILTERS.map((filter) => (
-          <button key={filter} className={`mapChip ${filter === '전체' ? 'active' : ''}`} type="button">
+        {MAP_FILTERS.map((filter) => (
+          <button
+            key={filter}
+            className={`mapChip ${selectedCategories.includes(filter) ? 'active' : ''}`}
+            type="button"
+            onClick={() => toggleCategory(filter)}
+          >
             {filter}
           </button>
         ))}
@@ -500,22 +649,117 @@ export function MapPage() {
             상세 정보
           </button>
           <div className="mapDetailHero">
-            {selectedPin.image ? (
-              <img src={selectedPin.image} alt={selectedPin.title} />
+            {detailImageUrl(selectedPin) ? (
+              <img src={detailImageUrl(selectedPin) ?? ''} alt={selectedPin.title} />
             ) : (
               <img className="mapDetailFallbackIcon" src={iconUrlForPin(selectedPin)} alt="" />
             )}
           </div>
           <div className="mapDetailBody">
             <h1>{selectedPin.title}</h1>
-            <p>주소: {addressText(selectedPin)}</p>
-            <p>요금: {compactText(selectedPin.summary.fee, '요금 정보 없음')}</p>
-            <p>기간: {selectedRange}</p>
-            <p>좌표: {selectedPin.location.lat.toFixed(5)}, {selectedPin.location.lng.toFixed(5)}</p>
-            <button type="button" onClick={() => setSelectedPin(null)}>
-              장소 닫기
+            <dl className="mapDetailInfo">
+              <div>
+                <dt>주소</dt>
+                <dd>{addressText(selectedPin)}</dd>
+              </div>
+              {selectedPin.zipcode ? (
+                <div>
+                  <dt>우편</dt>
+                  <dd>{selectedPin.zipcode}</dd>
+                </div>
+              ) : null}
+              <div>
+                <dt>{selectedPin.kind === 'festival' ? '장소' : '주차'}</dt>
+                <dd>{placeLabel(selectedPin)}</dd>
+              </div>
+              <div>
+                <dt>{selectedPin.kind === 'festival' ? '기간' : '운영'}</dt>
+                <dd>{selectedRange}</dd>
+              </div>
+              {selectedPin.kind === 'tour' ? (
+                <div>
+                  <dt>휴무</dt>
+                  <dd>{compactText(selectedPin.summary.restDate, '휴무 정보 없음')}</dd>
+                </div>
+              ) : null}
+              <div>
+                <dt>요금</dt>
+                <dd>{compactText(selectedPin.summary.fee, '요금 정보 없음')}</dd>
+              </div>
+              <div>
+                <dt>문의</dt>
+                <dd>{contactText(selectedPin)}</dd>
+              </div>
+            </dl>
+            <p className="mapDetailOverview">{overviewText(selectedPin)}</p>
+            <button type="button" onClick={addSelectedPinToCart}>
+              {cartPins.some((pin) => pin.id === selectedPin.id) ? '담긴 장소' : '장소 담기'}
             </button>
           </div>
+        </aside>
+      ) : null}
+
+      {hasCartContent ? (
+        <aside className="mapCartPanel" aria-label="여행 일정 장바구니">
+          <div className="mapCartBack" aria-hidden="true">
+            ←
+          </div>
+
+          {cartDays.map((dayPins, dayIndex) => (
+            <section key={dayIndex} className={`mapCartDay ${dayIndex === activeCartDay ? 'active' : ''}`}>
+              <div className="mapCartDayHeader">
+                <button className="mapCartDayLabel" type="button" onClick={() => setActiveCartDay(dayIndex)}>
+                  {dayIndex + 1}DAY
+                </button>
+                {dayIndex > 0 ? (
+                  <button className="mapCartRemoveDay" type="button" aria-label={`${dayIndex + 1}DAY 삭제`} onClick={() => removeCartDay(dayIndex)}>
+                    ×
+                  </button>
+                ) : null}
+              </div>
+              <div
+                className="mapCartList"
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={() => moveCartPin(dayIndex)}
+              >
+                {dayPins.length === 0 ? <div className="mapCartEmpty">이 날짜에 담을 장소를 선택하세요.</div> : null}
+                {dayPins.map((pin) => (
+                  <article
+                    key={pin.id}
+                    className={`mapCartItem ${draggingPin?.pinId === pin.id ? 'dragging' : ''}`}
+                    draggable
+                    onDragStart={() => setDraggingPin({ dayIndex, pinId: pin.id })}
+                    onDragEnd={() => setDraggingPin(null)}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={(event) => {
+                      event.stopPropagation()
+                      moveCartPin(dayIndex, pin.id)
+                    }}
+                  >
+                    <div className="mapCartThumb">
+                      {detailImageUrl(pin) ? (
+                        <img src={detailImageUrl(pin) ?? ''} alt="" />
+                      ) : (
+                        <img className="mapCartFallbackIcon" src={iconUrlForPin(pin)} alt="" />
+                      )}
+                    </div>
+                    <div className="mapCartTitle">{pin.title}</div>
+                    <button type="button" aria-label={`${pin.title} 삭제`} onClick={() => removePinFromCart(dayIndex, pin.id)}>
+                      ×
+                    </button>
+                  </article>
+                ))}
+              </div>
+            </section>
+          ))}
+
+          <button className="mapCartAddDay" type="button" aria-label="일정 일차 추가" onClick={addCartDay}>
+            +
+          </button>
+
+          <button className="mapCartCreateBtn" type="button" onClick={() => console.log('[PinTravel itinerary draft]', itineraryDraft)}>
+            일정 생성
+          </button>
         </aside>
       ) : null}
 
