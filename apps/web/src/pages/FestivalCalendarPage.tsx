@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 
+import { HomeLandingHeader } from '../components/HomeLandingHeader'
 import { fetchFestivalDayCounts, fetchFestivalsByDay, type FestivalListItem } from '../lib/api'
 
 type CalendarCell = {
@@ -71,6 +73,7 @@ function buildCalendarCells(year: number, month: number): CalendarCell[] {
 const DOW_LABELS = ['일', '월', '화', '수', '목', '금', '토'] as const
 
 export function FestivalCalendarPage() {
+  const nav = useNavigate()
   const today = useMemo(() => {
     const d = new Date()
     return { y: d.getFullYear(), m: d.getMonth() + 1, d: d.getDate() }
@@ -99,7 +102,10 @@ export function FestivalCalendarPage() {
         for (const { date, count } of r.days) m.set(date, count)
         setDayCounts(m)
       })
-      .catch(() => setError('달력 데이터를 불러오지 못했어요.'))
+      .catch((err) => {
+        if ((err as { name?: string } | null)?.name === 'AbortError') return
+        setError('달력 데이터를 불러오지 못했어요.')
+      })
       .finally(() => setLoadingCounts(false))
     return () => ac.abort()
   }, [year, month])
@@ -110,7 +116,10 @@ export function FestivalCalendarPage() {
     setError(null)
     fetchFestivalsByDay({ date: selectedDate }, ac.signal)
       .then((r) => setFestivals(r.festivals))
-      .catch(() => setError('축제 리스트를 불러오지 못했어요.'))
+      .catch((err) => {
+        if ((err as { name?: string } | null)?.name === 'AbortError') return
+        setError('축제 리스트를 불러오지 못했어요.')
+      })
       .finally(() => setLoadingList(false))
     return () => ac.abort()
   }, [selectedDate])
@@ -139,9 +148,31 @@ export function FestivalCalendarPage() {
     setSelectedDate(c.date)
   }
 
+  function festivalLatLng(f: FestivalListItem) {
+    const coords = f.location?.coordinates
+    if (!coords || coords.length < 2) return null
+    const [lng, lat] = coords
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
+    return { lat, lng }
+  }
+
+  function onFestivalClick(f: FestivalListItem) {
+    const ll = festivalLatLng(f)
+    if (!ll) return
+    const qs = new URLSearchParams({
+      lat: String(ll.lat),
+      lng: String(ll.lng),
+      contentId: f.contentId,
+    })
+    nav(`/map?${qs.toString()}`)
+  }
+
   return (
-    <section className="page calendarPage">
-      <div className={`calendarLayout ${expanded ? 'expanded' : ''}`}>
+    <div className="calendarShell">
+      <HomeLandingHeader />
+
+      <section className="page calendarPage">
+        <div className={`calendarLayout ${expanded ? 'expanded' : ''}`}>
         <section className="calendarLeft" aria-label="달력">
           <div className="calendarCard">
             <div className="calendarHeader">
@@ -210,7 +241,16 @@ export function FestivalCalendarPage() {
           ) : (
             <div className="festivalList">
               {(expanded ? festivals : festivals.slice(0, 2)).map((f) => (
-                <article key={f.contentId} className="festivalItem">
+                <article
+                  key={f.contentId}
+                  className="festivalItem"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => onFestivalClick(f)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') onFestivalClick(f)
+                  }}
+                >
                   <div className="festivalThumb">
                     {f.image ? <img src={f.image} alt="" loading="lazy" /> : <div className="thumbFallback" />}
                   </div>
@@ -238,8 +278,9 @@ export function FestivalCalendarPage() {
             </div>
           ) : null}
         </section>
-      </div>
-    </section>
+        </div>
+      </section>
+    </div>
   )
 }
 

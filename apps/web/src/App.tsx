@@ -11,10 +11,12 @@ import { SignupPage } from './pages/SignupPage'
 function AppLayout() {
   const location = useLocation()
   const isMapPage = location.pathname === '/map'
+  const isHomePage = location.pathname === '/'
+  const isCalendarPage = location.pathname === '/calendar'
 
   return (
     <div className="app">
-      {isMapPage ? <MapNavBar /> : <NavBar />}
+      {isMapPage ? <MapNavBar /> : isHomePage || isCalendarPage ? null : <NavBar />}
       <main className="appMain">
         <Routes>
           <Route path="/" element={<HomePage />} />

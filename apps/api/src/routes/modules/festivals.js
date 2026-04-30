@@ -71,7 +71,7 @@ festivalsRouter.get("/main/active", async (req, res) => {
   const parsed = z
     .object({
       date: isoDate.optional(),
-      limit: z.coerce.number().int().min(1).max(12).optional(),
+      limit: z.coerce.number().int().min(1).max(100).optional(),
     })
     .safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ ok: false, error: "INVALID_QUERY" });

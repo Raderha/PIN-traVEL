@@ -75,7 +75,7 @@ export function MapNavBar() {
 
   async function onCreateSession() {
     if (!token) {
-      nav('/login')
+      nav(`/login?next=${encodeURIComponent('/map')}`)
       return
     }
 

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 
 import festivalIconUrl from '../assets/festival.png'
 import naturalIconUrl from '../assets/natural.png'
@@ -294,6 +295,8 @@ function loadStoredCartDays() {
 }
 
 export function MapPage() {
+  const location = useLocation()
+  const nav = useNavigate()
   const mapElementRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<NaverMapInstance | null>(null)
   const markersRef = useRef<NaverMarkerInstance[]>([])
@@ -336,6 +339,21 @@ export function MapPage() {
     [cartDays],
   )
 
+  const token = useMemo(() => {
+    return typeof window !== 'undefined' ? localStorage.getItem('pintravel_token') : null
+  }, [])
+
+  function requireLogin() {
+    const next = `${location.pathname}${location.search}`
+    nav(`/login?next=${encodeURIComponent(next)}`)
+  }
+
+  useEffect(() => {
+    const sp = new URLSearchParams(location.search)
+    const session = sp.get('session')
+    if (session && !token) requireLogin()
+  }, [location.search, token])
+
   useEffect(() => {
     localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(cartDays))
   }, [cartDays])
@@ -359,6 +377,29 @@ export function MapPage() {
       })
     return () => ac.abort()
   }, [festivalFilterEnabled, filterRange])
+
+  useEffect(() => {
+    const maps = getNaverMaps()
+    const map = mapRef.current
+    if (!mapReady || !maps || !map) return
+
+    const sp = new URLSearchParams(location.search)
+    const latRaw = sp.get('lat')
+    const lngRaw = sp.get('lng')
+    const contentId = sp.get('contentId')
+    const lat = latRaw ? Number(latRaw) : null
+    const lng = lngRaw ? Number(lngRaw) : null
+
+    if (lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng)) {
+      map.setCenter(new maps.LatLng(lat, lng))
+      map.setZoom?.(16)
+    }
+
+    if (contentId) {
+      const match = summaryPins.find((p) => p.kind === 'festival' && p.contentId === contentId)
+      if (match) setSelectedPin(match)
+    }
+  }, [location.search, mapReady, summaryPins])
 
   useEffect(() => {
     function onToggleFilter() {
@@ -391,6 +432,10 @@ export function MapPage() {
 
   function addSelectedPinToCart() {
     if (!selectedPin) return
+    if (!token) {
+      requireLogin()
+      return
+    }
     setCartDays((days) => {
       if (days.some((day) => day.some((pin) => pin.id === selectedPin.id))) return days
       return days.map((day, index) => (index === activeCartDay ? [...day, selectedPin] : day))
