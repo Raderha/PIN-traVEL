@@ -2,14 +2,14 @@ import { useState } from 'react'
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 import logoUrl from '../assets/logo.png'
 import { createSession } from '../lib/api'
+import { clearPintravelClientStorage } from '../lib/clearPintravelStorage'
 
 export function NavBar() {
   const nav = useNavigate()
   const token = typeof window !== 'undefined' ? localStorage.getItem('pintravel_token') : null
 
   function onLogout() {
-    localStorage.removeItem('pintravel_token')
-    localStorage.removeItem('pintravel_user')
+    clearPintravelClientStorage()
     nav('/', { replace: true })
   }
 
@@ -64,8 +64,7 @@ export function MapNavBar() {
   const [sessionError, setSessionError] = useState<string | null>(null)
 
   function onLogout() {
-    localStorage.removeItem('pintravel_token')
-    localStorage.removeItem('pintravel_user')
+    clearPintravelClientStorage()
     nav('/', { replace: true })
   }
 

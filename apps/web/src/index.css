@@ -1006,21 +1006,26 @@ p {
 }
 
 .mapChip {
-  border: none;
+  cursor: pointer;
+  border: 1px solid #e5e7eb;
   border-radius: 7px;
   padding: 7px 10px;
-  background: #222222;
-  color: #ffffff;
+  background: #ffffff;
+  color: #111827;
   font: inherit;
   font-size: 13px;
   font-weight: 900;
-  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.18);
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.08);
 }
 
-.mapChip.active,
-.mapChip:hover {
-  background: #8bdcff;
-  color: #0f172a;
+.mapChip:not(.mapChip--selected):hover {
+  background: #f3f4f6;
+  border-color: #d1d5db;
+}
+
+.mapChip:focus-visible {
+  outline: 2px solid #0b5fff;
+  outline-offset: 2px;
 }
 
 .mapDateCard {

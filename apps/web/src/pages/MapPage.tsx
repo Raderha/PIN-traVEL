@@ -1,11 +1,19 @@
+import type { CSSProperties } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 
+import cultureIconUrl from '../assets/culture.png'
+import etcIconUrl from '../assets/etc.png'
 import festivalIconUrl from '../assets/festival.png'
+import marketIconUrl from '../assets/market.png'
 import naturalIconUrl from '../assets/natural.png'
 import palaceIconUrl from '../assets/palace.png'
-import festivalPinTemplateUrl from '../assets/pin_festival.png'
-import pinTemplateUrl from '../assets/pin.png'
+import pinTemplateHistoryUrl from '../assets/pin.png'
+import pinTemplateFestivalUrl from '../assets/pin_festival.png'
+import pinTemplateShoppingUrl from '../assets/pin_shopping.png'
+import pinTemplateCultureUrl from '../assets/pin_calture.png'
+import pinTemplateNaturalUrl from '../assets/pin_natural.png'
+import pinTemplateEtcUrl from '../assets/pin_etc.png'
 import { fetchMapSummaryPins, type SummaryPin } from '../lib/api'
 
 type NaverLatLng = unknown
@@ -130,14 +138,72 @@ function overviewText(pin: SummaryPin) {
   return compactText(pin.overview, '상세 설명 정보 없음')
 }
 
+const FILTERS = ['전체', '역사/문화', '축제', '시장/쇼핑', '전시/문화시설', '자연/공원'] as const
+type MapCategory = (typeof FILTERS)[number] | '기타'
+const MAP_FILTERS: MapCategory[] = [...FILTERS, '기타']
+
+/** 카테고리 칩 “선택” 배경색 — 각 정보 요약형 핀(`pin*.png`) 톤에 맞춤 */
+const MAP_CHIP_SELECTED_STYLE: Record<MapCategory, CSSProperties> = {
+  전체: { background: '#111827', color: '#ffffff', borderColor: '#111827' },
+  '역사/문화': { background: '#9fd8f9', color: '#0f172a', borderColor: '#7ec8ee' },
+  축제: { background: '#f8c9d9', color: '#1f2937', borderColor: '#f5b8cc' },
+  '시장/쇼핑': { background: '#dbd0f7', color: '#1f2937', borderColor: '#c9bef0' },
+  '전시/문화시설': { background: '#fff5c9', color: '#1f2937', borderColor: '#f8e896' },
+  '자연/공원': { background: '#b8efd4', color: '#064e3b', borderColor: '#8edebb' },
+  기타: { background: '#e8eaef', color: '#1f2937', borderColor: '#d8dbe3' },
+}
+
+function categoryForPin(pin: SummaryPin): MapCategory {
+  if (pin.kind === 'festival') return '축제'
+
+  const cat1 = pin.detail?.category?.cat1
+  const cat2 = pin.detail?.category?.cat2
+  if (!cat1 || !cat2) return '기타'
+
+  if (cat1 === 'A02' && ['A0201', 'A0205', 'A0206'].includes(cat2)) return '역사/문화'
+  if (cat1 === 'A04' && ['A0401', 'A0402'].includes(cat2)) return '시장/쇼핑'
+  if (cat1 === 'A02' && ['A0202', 'A0203'].includes(cat2)) return '전시/문화시설'
+  if (cat1 === 'A01' && ['A0101', 'A0102'].includes(cat2)) return '자연/공원'
+
+  return '기타'
+}
+
 function iconUrlForPin(pin: SummaryPin) {
-  if (pin.iconType === 'festival') return festivalIconUrl
-  if (pin.iconType === 'palace') return palaceIconUrl
-  return naturalIconUrl
+  switch (categoryForPin(pin)) {
+    case '역사/문화':
+      return palaceIconUrl
+    case '축제':
+      return festivalIconUrl
+    case '자연/공원':
+      return naturalIconUrl
+    case '전시/문화시설':
+      return cultureIconUrl
+    case '기타':
+      return etcIconUrl
+    case '시장/쇼핑':
+      return marketIconUrl
+    case '전체':
+    default:
+      return etcIconUrl
+  }
 }
 
 function pinTemplateUrlForPin(pin: SummaryPin) {
-  return pin.iconType === 'festival' ? festivalPinTemplateUrl : pinTemplateUrl
+  switch (categoryForPin(pin)) {
+    case '축제':
+      return pinTemplateFestivalUrl
+    case '역사/문화':
+      return pinTemplateHistoryUrl
+    case '시장/쇼핑':
+      return pinTemplateShoppingUrl
+    case '전시/문화시설':
+      return pinTemplateCultureUrl
+    case '자연/공원':
+      return pinTemplateNaturalUrl
+    case '기타':
+    default:
+      return pinTemplateEtcUrl
+  }
 }
 
 function createSummaryPinContent(pin: SummaryPin) {
@@ -261,25 +327,6 @@ function loadNaverMapScript() {
   })
 
   return naverMapScriptPromise
-}
-
-const FILTERS = ['전체', '역사/문화', '축제', '시장/쇼핑', '전시/문화시설', '자연/공원'] as const
-type MapCategory = (typeof FILTERS)[number] | '기타'
-const MAP_FILTERS: MapCategory[] = [...FILTERS, '기타']
-
-function categoryForPin(pin: SummaryPin): MapCategory {
-  if (pin.kind === 'festival') return '축제'
-
-  const cat1 = pin.detail?.category?.cat1
-  const cat2 = pin.detail?.category?.cat2
-  if (!cat1 || !cat2) return '기타'
-
-  if (cat1 === 'A02' && ['A0201', 'A0205', 'A0206'].includes(cat2)) return '역사/문화'
-  if (cat1 === 'A04' && ['A0401', 'A0402'].includes(cat2)) return '시장/쇼핑'
-  if (cat1 === 'A02' && ['A0202', 'A0203'].includes(cat2)) return '전시/문화시설'
-  if (cat1 === 'A01' && ['A0101', 'A0102'].includes(cat2)) return '자연/공원'
-
-  return '기타'
 }
 
 function loadStoredCartDays() {
@@ -630,8 +677,11 @@ export function MapPage() {
         {MAP_FILTERS.map((filter) => (
           <button
             key={filter}
-            className={`mapChip ${selectedCategories.includes(filter) ? 'active' : ''}`}
+            className={`mapChip ${selectedCategories.includes(filter) ? 'mapChip--selected' : ''}`}
             type="button"
+            style={
+              selectedCategories.includes(filter) ? MAP_CHIP_SELECTED_STYLE[filter] : undefined
+            }
             onClick={() => toggleCategory(filter)}
           >
             {filter}
