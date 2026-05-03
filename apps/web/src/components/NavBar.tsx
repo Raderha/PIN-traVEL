@@ -99,7 +99,7 @@ export function MapNavBar() {
     <header className="mapNavWrap">
       <nav className="mapNav">
         <Link className="brand mapBrand" to="/">
-          <img className="brandLogo" src={logoUrl} alt="PIN-TRAVEL" />
+          <span className="mapBrandText">PIN-traVEL</span>
         </Link>
 
         <div className="mapNavControls">

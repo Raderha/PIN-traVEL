@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { signup } from '../lib/api'
-import logoUrl from '../assets/logo.png'
 import blossomsUrl from '../assets/blossoms.png'
 import gyeongbokgungUrl from '../assets/gyeongbokgung.png'
 
@@ -73,7 +72,9 @@ export function SignupPage() {
 
       <div className="loginInner">
         <div className="loginBrand">
-          <img className="loginLogo" src={logoUrl} alt="PIN-TRAVEL" />
+          <Link className="loginLogoText" to="/">
+            PIN-traVEL
+          </Link>
         </div>
 
         <p className="loginGreeting">회원가입</p>

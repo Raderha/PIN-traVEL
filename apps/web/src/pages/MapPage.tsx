@@ -14,7 +14,13 @@ import pinTemplateShoppingUrl from '../assets/pin_shopping.png'
 import pinTemplateCultureUrl from '../assets/pin_calture.png'
 import pinTemplateNaturalUrl from '../assets/pin_natural.png'
 import pinTemplateEtcUrl from '../assets/pin_etc.png'
-import { fetchMapSummaryPins, type SummaryPin } from '../lib/api'
+import {
+  fetchMapSummaryPins,
+  fetchNearbyAiRecommendations,
+  type AiRecommendationItem,
+  type AiRecommendationsResponse,
+  type SummaryPin,
+} from '../lib/api'
 
 type NaverLatLng = unknown
 type NaverPoint = unknown
@@ -136,6 +142,49 @@ function contactText(pin: SummaryPin) {
 
 function overviewText(pin: SummaryPin) {
   return compactText(pin.overview, '상세 설명 정보 없음')
+}
+
+function formatDistance(meters: number) {
+  if (!Number.isFinite(meters)) return ''
+  if (meters >= 1000) return `${(meters / 1000).toFixed(1).replace(/\.0$/, '')} km`
+  return `${Math.round(meters)} m`
+}
+
+function recommendationAddressText(item: AiRecommendationItem) {
+  const addr1 = compactText(item.address?.addr1, '')
+  const addr2 = compactText(item.address?.addr2, '')
+  return [addr1, addr2].filter(Boolean).join(' ') || compactText(item.tel, '상세 정보 없음')
+}
+
+function recommendationToCartPin(item: AiRecommendationItem, kind: 'food' | 'hotel'): SummaryPin | null {
+  if (!item.location) return null
+  const label = kind === 'food' ? '식당' : '숙소'
+
+  return {
+    id: `recommendation:${kind}:${item.contentId}`,
+    contentId: item.contentId,
+    kind: 'tour',
+    iconType: 'natural',
+    title: item.title,
+    subtitle: recommendationAddressText(item),
+    address: item.address,
+    image: item.image,
+    images: item.image ? { firstimage: item.image, firstimage2: null } : null,
+    zipcode: null,
+    tel: item.tel,
+    infoCenter: item.tel,
+    overview: `${label} 추천 장소입니다. ${recommendationAddressText(item)}`,
+    detail: {
+      category: item.category,
+      parking: null,
+    },
+    summary: {
+      fee: null,
+      time: `${formatDistance(item.distanceMeters)} 거리`,
+      restDate: null,
+    },
+    location: item.location,
+  }
 }
 
 const FILTERS = ['전체', '역사/문화', '축제', '시장/쇼핑', '전시/문화시설', '자연/공원'] as const
@@ -353,6 +402,7 @@ export function MapPage() {
   const [selectedPin, setSelectedPin] = useState<SummaryPin | null>(null)
   const [cartDays, setCartDays] = useState<SummaryPin[][]>(() => loadStoredCartDays())
   const [activeCartDay, setActiveCartDay] = useState(0)
+  const [cartPanelOpen, setCartPanelOpen] = useState(true)
   const [draggingPin, setDraggingPin] = useState<{ dayIndex: number; pinId: string } | null>(null)
   const [selectedCategories, setSelectedCategories] = useState<MapCategory[]>(['전체'])
   const [calendarOpen, setCalendarOpen] = useState(false)
@@ -360,9 +410,15 @@ export function MapPage() {
   const [filterRange, setFilterRange] = useState({ from: toIsoDate(1), to: toIsoDate(FILTER_DAYS) })
   const [mapReady, setMapReady] = useState(false)
   const [zoomLevel, setZoomLevel] = useState<number | null>(null)
+  const [aiRecommendations, setAiRecommendations] = useState<AiRecommendationsResponse | null>(null)
+  const [aiRecommendationPinId, setAiRecommendationPinId] = useState<string | null>(null)
+  const [aiRecommendationLoading, setAiRecommendationLoading] = useState(false)
+  const [aiRecommendationError, setAiRecommendationError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const selectedRange = useMemo(() => (selectedPin ? summaryDateRange(selectedPin) : null), [selectedPin])
+  const selectedAiRecommendations =
+    selectedPin && aiRecommendationPinId === selectedPin.id ? aiRecommendations : null
   const filterRangeLabel = useMemo(() => rangeLabel(filterRange.from, filterRange.to), [filterRange])
   const cartPins = useMemo(() => cartDays.flat(), [cartDays])
   const hasCartContent = cartPins.length > 0
@@ -477,16 +533,54 @@ export function MapPage() {
     })
   }
 
+  async function loadAiRecommendations(pin: SummaryPin) {
+    setAiRecommendationLoading(true)
+    setAiRecommendationError(null)
+    setAiRecommendationPinId(pin.id)
+    try {
+      const recommendations = await fetchNearbyAiRecommendations({
+        lat: pin.location.lat,
+        lng: pin.location.lng,
+        limit: 3,
+      })
+      setAiRecommendations(recommendations)
+    } catch {
+      setAiRecommendations(null)
+      setAiRecommendationError('주변 식당/숙소 추천을 불러오지 못했어요.')
+    } finally {
+      setAiRecommendationLoading(false)
+    }
+  }
+
   function addSelectedPinToCart() {
-    if (!selectedPin) return
+    const pin = selectedPin
+    if (!pin) return
     if (!token) {
       requireLogin()
       return
     }
     setCartDays((days) => {
-      if (days.some((day) => day.some((pin) => pin.id === selectedPin.id))) return days
-      return days.map((day, index) => (index === activeCartDay ? [...day, selectedPin] : day))
+      if (days.some((day) => day.some((cartPin) => cartPin.id === pin.id))) return days
+      return days.map((day, index) => (index === activeCartDay ? [...day, pin] : day))
     })
+    setCartPanelOpen(true)
+    void loadAiRecommendations(pin)
+  }
+
+  function addRecommendationToCart(item: AiRecommendationItem, kind: 'food' | 'hotel') {
+    if (!token) {
+      requireLogin()
+      return
+    }
+
+    const pin = recommendationToCartPin(item, kind)
+    if (!pin) return
+
+    setCartDays((days) => {
+      if (days.some((day) => day.some((cartPin) => cartPin.id === pin.id))) return days
+      return days.map((day, index) => (index === activeCartDay ? [...day, pin] : day))
+    })
+    setCartPanelOpen(true)
   }
 
   function removePinFromCart(dayIndex: number, pinId: string) {
@@ -790,15 +884,98 @@ export function MapPage() {
             <button type="button" onClick={addSelectedPinToCart}>
               {cartPins.some((pin) => pin.id === selectedPin.id) ? '담긴 장소' : '장소 담기'}
             </button>
+            <section className="mapAiRecommendPanel" aria-label="AI 추천 식당 및 숙소">
+              <h2>AI 추천(식당/숙소)</h2>
+              <p className="mapAiRecommendHelp">장소를 담으면 반경 1km부터 최대 3km까지 가까운 순서로 추천해요.</p>
+
+              {aiRecommendationLoading && aiRecommendationPinId === selectedPin.id ? (
+                <div className="mapAiRecommendState">주변 추천을 불러오는 중이에요.</div>
+              ) : null}
+              {aiRecommendationError && aiRecommendationPinId === selectedPin.id ? (
+                <div className="mapAiRecommendError">{aiRecommendationError}</div>
+              ) : null}
+
+              {selectedAiRecommendations ? (
+                <>
+                  <div className="mapAiRecommendGroup">
+                    <h3>주변 식당 추천</h3>
+                    {selectedAiRecommendations.food.items.length ? (
+                      selectedAiRecommendations.food.items.map((item) => (
+                        <article key={`food:${item.contentId}`} className="mapAiRecommendItem">
+                          <div className="mapAiRecommendThumb">
+                            {item.image ? <img src={item.image} alt="" /> : <div className="thumbFallback" />}
+                          </div>
+                          <div className="mapAiRecommendBody">
+                            <div className="mapAiRecommendTitle">{item.title}</div>
+                            <div className="mapAiRecommendMeta">{formatDistance(item.distanceMeters)}</div>
+                            <div className="mapAiRecommendDesc">{recommendationAddressText(item)}</div>
+                            <button
+                              className="mapAiRecommendAddBtn"
+                              type="button"
+                              disabled={!item.location || cartPins.some((pin) => pin.id === `recommendation:food:${item.contentId}`)}
+                              onClick={() => addRecommendationToCart(item, 'food')}
+                            >
+                              {cartPins.some((pin) => pin.id === `recommendation:food:${item.contentId}`)
+                                ? '담긴 장소'
+                                : '장소 담기'}
+                            </button>
+                          </div>
+                        </article>
+                      ))
+                    ) : (
+                      <div className="mapAiRecommendState">3km 안에 추천할 식당이 없어요.</div>
+                    )}
+                  </div>
+
+                  <div className="mapAiRecommendGroup">
+                    <h3>주변 숙소 추천</h3>
+                    {selectedAiRecommendations.hotel.items.length ? (
+                      selectedAiRecommendations.hotel.items.map((item) => (
+                        <article key={`hotel:${item.contentId}`} className="mapAiRecommendItem">
+                          <div className="mapAiRecommendThumb">
+                            {item.image ? <img src={item.image} alt="" /> : <div className="thumbFallback" />}
+                          </div>
+                          <div className="mapAiRecommendBody">
+                            <div className="mapAiRecommendTitle">{item.title}</div>
+                            <div className="mapAiRecommendMeta">{formatDistance(item.distanceMeters)}</div>
+                            <div className="mapAiRecommendDesc">{recommendationAddressText(item)}</div>
+                            <button
+                              className="mapAiRecommendAddBtn"
+                              type="button"
+                              disabled={!item.location || cartPins.some((pin) => pin.id === `recommendation:hotel:${item.contentId}`)}
+                              onClick={() => addRecommendationToCart(item, 'hotel')}
+                            >
+                              {cartPins.some((pin) => pin.id === `recommendation:hotel:${item.contentId}`)
+                                ? '담긴 장소'
+                                : '장소 담기'}
+                            </button>
+                          </div>
+                        </article>
+                      ))
+                    ) : (
+                      <div className="mapAiRecommendState">3km 안에 추천할 숙소가 없어요.</div>
+                    )}
+                  </div>
+                </>
+              ) : !aiRecommendationLoading ? (
+                <div className="mapAiRecommendState">장소 담기 버튼을 누르면 주변 추천이 표시돼요.</div>
+              ) : null}
+            </section>
           </div>
         </aside>
       ) : null}
 
-      {hasCartContent ? (
+      {hasCartContent && !cartPanelOpen ? (
+        <button className="mapCartOpenTab" type="button" onClick={() => setCartPanelOpen(true)}>
+          장바구니 열기
+        </button>
+      ) : null}
+
+      {hasCartContent && cartPanelOpen ? (
         <aside className="mapCartPanel" aria-label="여행 일정 장바구니">
-          <div className="mapCartBack" aria-hidden="true">
+          <button className="mapCartBack" type="button" aria-label="장바구니 패널 접기" onClick={() => setCartPanelOpen(false)}>
             ←
-          </div>
+          </button>
 
           {cartDays.map((dayPins, dayIndex) => (
             <section key={dayIndex} className={`mapCartDay ${dayIndex === activeCartDay ? 'active' : ''}`}>

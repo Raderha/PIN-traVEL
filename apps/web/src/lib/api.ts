@@ -70,6 +70,31 @@ export type SummaryPinsResponse = {
   pins: SummaryPin[]
 }
 
+export type AiRecommendationItem = {
+  contentId: string
+  title: string
+  address: { addr1: string | null; addr2: string | null } | null
+  image: string | null
+  tel: string | null
+  category: { cat1: string | null; cat2: string | null; cat3: string | null } | null
+  location: { lat: number; lng: number } | null
+  distanceMeters: number
+}
+
+export type AiRecommendationGroup = {
+  radiusKm: number
+  items: AiRecommendationItem[]
+}
+
+export type AiRecommendationsResponse = {
+  ok: true
+  origin: { lat: number; lng: number }
+  limit: number
+  search: { defaultRadiusKm: number; maxRadiusKm: number; stepKm: number }
+  food: AiRecommendationGroup
+  hotel: AiRecommendationGroup
+}
+
 async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   const res = await fetch(path, { signal, credentials: 'include' })
   if (!res.ok) throw new Error(`HTTP_${res.status}`)
@@ -129,6 +154,18 @@ export function fetchMapSummaryPins(
   if (params.from) qs.set('from', params.from)
   if (params.to) qs.set('to', params.to)
   return getJson<SummaryPinsResponse>(`/api/map/summary-pins?${qs.toString()}`, signal)
+}
+
+export function fetchNearbyAiRecommendations(
+  params: { lat: number; lng: number; limit?: number },
+  signal?: AbortSignal,
+) {
+  const qs = new URLSearchParams({
+    lat: String(params.lat),
+    lng: String(params.lng),
+    limit: String(params.limit ?? 3),
+  })
+  return getJson<AiRecommendationsResponse>(`/api/airecommand/nearby?${qs.toString()}`, signal)
 }
 
 export type AuthUser = { id: string; username: string; email?: string | null }

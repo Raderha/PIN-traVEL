@@ -6,6 +6,7 @@
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
     "sync:tourapi:raw": "node src/scripts/syncTourApiRaw.js",
+    "sync:busan:hotel-food": "node src/scripts/syncBusanHotelFood.js",
     "lint": "node -e \"console.log('no lint configured yet')\""
   },
   "dependencies": {

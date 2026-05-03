@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
 import mainHeroImageUrl from '../assets/mainpage_img.png'
-import featureCalendarUrl from '../assets/mainpage_calendar.png'
-import featureMapUrl from '../assets/mainpage_map.png'
+import featureAiUrl from '../assets/features_ai.png'
+import featureTogetherUrl from '../assets/features_toget.png'
 import { HomeLandingHeader } from '../components/HomeLandingHeader'
 import { fetchMainFestivals, type FestivalListItem } from '../lib/api'
 
@@ -165,7 +165,7 @@ export function HomePage() {
 
               <article className="homeFeatureCard">
                 <div className="homeFeatureIcon yellow" aria-hidden="true">
-                  <img src={featureCalendarUrl} alt="" />
+                  <img src={featureTogetherUrl} alt="" />
                 </div>
                 <div className="homeFeatureName">동시 협업</div>
                 <div className="homeFeatureDesc">친구들과 지도를 공유하며 함께 여행 계획을 완성하세요.</div>
@@ -176,7 +176,7 @@ export function HomePage() {
 
               <article className="homeFeatureCard">
                 <div className="homeFeatureIcon blue" aria-hidden="true">
-                  <img src={featureMapUrl} alt="" />
+                  <img src={featureAiUrl} alt="" />
                 </div>
                 <div className="homeFeatureName">AI 일정 생성</div>
                 <div className="homeFeatureDesc">선택한 장소를 기반으로, 최적의 여행 일정을 자동으로 구성해드립니다.</div>
@@ -187,9 +187,9 @@ export function HomePage() {
             </div>
 
             <div className="homeFeaturesMore">
-              <Link className="homeFeaturesMoreLink" to="/calendar">
+              {/* <Link className="homeFeaturesMoreLink" to="/calendar">
                 Learn more →
-              </Link>
+              </Link> */}
             </div>
           </section>
         </main>

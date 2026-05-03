@@ -1,6 +1,7 @@
 import './App.css'
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 
+import { HomeLandingHeader } from './components/HomeLandingHeader'
 import { MapNavBar, NavBar } from './components/NavBar'
 import { HomePage } from './pages/HomePage'
 import { FestivalCalendarPage } from './pages/FestivalCalendarPage'
@@ -13,10 +14,19 @@ function AppLayout() {
   const isMapPage = location.pathname === '/map'
   const isHomePage = location.pathname === '/'
   const isCalendarPage = location.pathname === '/calendar'
+  const isAuthPage = location.pathname === '/login' || location.pathname === '/signup'
 
   return (
     <div className="app">
-      {isMapPage ? <MapNavBar /> : isHomePage || isCalendarPage ? null : <NavBar />}
+      {isMapPage ? (
+        <MapNavBar />
+      ) : isAuthPage ? (
+        <div className="landingNavShell">
+          <HomeLandingHeader />
+        </div>
+      ) : isHomePage || isCalendarPage ? null : (
+        <NavBar />
+      )}
       <main className="appMain">
         <Routes>
           <Route path="/" element={<HomePage />} />
