@@ -59,7 +59,7 @@ export function SignupPage() {
       await signup({ username: u, password, email: em })
       nav('/login', { replace: true })
     } catch (e2) {
-      setError('회원가입에 실패했어요. (이미 사용 중인 아이디일 수 있어요)')
+      setError('회원가입에 실패했어요. (이미 사용 중인 아이디입니다)')
     } finally {
       setSubmitting(false)
     }
