@@ -10,6 +10,7 @@
     "lint": "node -e \"console.log('no lint configured yet')\""
   },
   "dependencies": {
+    "@google/genai": "^2.2.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
@@ -19,4 +20,3 @@
     "zod": "^3.23.8"
   }
 }
-

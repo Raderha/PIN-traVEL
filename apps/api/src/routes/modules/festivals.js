@@ -44,6 +44,27 @@ function pad2(n) {
   return String(n).padStart(2, "0");
 }
 
+/** 달력·메인 목록 공통 projection */
+const festivalListProjection = {
+  _id: 0,
+  contentId: 1,
+  title: 1,
+  startDate: 1,
+  endDate: 1,
+  address: 1,
+  location: 1,
+  image: 1,
+  tel: 1,
+  overview: 1,
+  eventPlace: 1,
+  useTime: 1,
+  fee: 1,
+  parking: 1,
+  idongCode: 1,
+  idong: 1,
+  area: 1,
+};
+
 function festivalListItem(f) {
   return {
     contentId: f.contentId,
@@ -58,6 +79,10 @@ function festivalListItem(f) {
     eventPlace: f.eventPlace ?? null,
     useTime: f.useTime ?? null,
     fee: f.fee ?? null,
+    parking: f.parking ?? null,
+    idongCode: f.idongCode ?? null,
+    idong: f.idong ?? null,
+    area: f.area ?? null,
   };
 }
 
@@ -82,21 +107,7 @@ festivalsRouter.get("/main/active", async (req, res) => {
     .find(
       { startDate: { $lte: date }, endDate: { $gte: date } },
       {
-        projection: {
-          _id: 0,
-          contentId: 1,
-          title: 1,
-          startDate: 1,
-          endDate: 1,
-          address: 1,
-          location: 1,
-          image: 1,
-          tel: 1,
-          overview: 1,
-          eventPlace: 1,
-          useTime: 1,
-          fee: 1,
-        },
+        projection: festivalListProjection,
       }
     )
     .sort({ endDate: 1, startDate: 1, title: 1 })
@@ -146,21 +157,7 @@ festivalsRouter.get("/calendar/day", async (req, res) => {
     .find(
       { startDate: { $lte: date }, endDate: { $gte: date } },
       {
-        projection: {
-          _id: 0,
-          contentId: 1,
-          title: 1,
-          startDate: 1,
-          endDate: 1,
-          address: 1,
-          location: 1,
-          image: 1,
-          tel: 1,
-          overview: 1,
-          eventPlace: 1,
-          useTime: 1,
-          fee: 1,
-        },
+        projection: festivalListProjection,
       }
     )
     .toArray();

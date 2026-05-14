@@ -167,12 +167,17 @@ function festivalDoc({ listRaw, commonRaw, introRaw }) {
   const firstimage = asString(pick(listRaw, ["firstimage", "firstimage2"]));
   const tel = asString(pick(listRaw, ["tel"]));
 
+  const common = firstTourApiItem(commonRaw);
+  const intro = firstTourApiItem(introRaw);
+
   const overview = asString(pick(commonRaw, ["overview"])) ?? asString(pick(introRaw, ["overview"]));
 
   // 축제 intro
-  const eventplace = asString(pick(introRaw, ["eventplace", "eventPlace"])) ?? asString(pick(commonRaw, ["eventplace", "eventPlace"]));
-  const playtime = asString(pick(introRaw, ["playtime", "playTime"])) ?? asString(pick(commonRaw, ["playtime", "playTime"]));
-  const eventcost = asString(pick(introRaw, ["eventcost", "eventCost"])) ?? asString(pick(commonRaw, ["eventcost", "eventCost"]));
+  const eventplace =
+    asString(pick(intro, ["eventplace", "eventPlace"])) ?? asString(pick(common, ["eventplace", "eventPlace"]));
+  const playtime = asString(pick(intro, ["playtime", "playTime"])) ?? asString(pick(common, ["playtime", "playTime"]));
+  const eventcost = asString(pick(intro, ["eventcost", "eventCost"])) ?? asString(pick(common, ["eventcost", "eventCost"]));
+  const parking = asString(pick(common, ["parking"])) ?? asString(pick(intro, ["parking"]));
 
   const region = regionFromRaw(listRaw);
 
@@ -190,6 +195,7 @@ function festivalDoc({ listRaw, commonRaw, introRaw }) {
     eventPlace: eventplace,
     useTime: playtime,
     fee: eventcost,
+    parking,
   };
 }
 

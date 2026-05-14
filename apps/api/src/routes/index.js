@@ -7,6 +7,7 @@ import { airecommandRouter } from "./modules/airecommand.js";
 import { mapRouter } from "./modules/map.js";
 import { festivalsRouter } from "./modules/festivals.js";
 import { itineraryRouter } from "./modules/itinerary.js";
+import { scheduleRouter } from "./modules/schedule.js";
 import { sessionsRouter } from "./modules/sessions.js";
 
 export function registerRoutes(app) {
@@ -15,6 +16,7 @@ export function registerRoutes(app) {
   app.use("/api/map", mapRouter);
   app.use("/api/festivals", festivalsRouter);
   app.use("/api/itinerary", itineraryRouter);
+  app.use("/api/schedule", scheduleRouter);
   app.use("/api/sessions", sessionsRouter);
 }
 

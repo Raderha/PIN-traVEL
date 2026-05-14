@@ -14,13 +14,22 @@ import pinTemplateShoppingUrl from '../assets/pin_shopping.png'
 import pinTemplateCultureUrl from '../assets/pin_calture.png'
 import pinTemplateNaturalUrl from '../assets/pin_natural.png'
 import pinTemplateEtcUrl from '../assets/pin_etc.png'
+import { ItineraryRoutePanel } from '../components/ItineraryRoutePanel'
+import { ItineraryScheduleModal, type ItineraryScheduleConfirmPayload } from '../components/ItineraryScheduleModal'
 import {
   fetchMapSummaryPins,
   fetchNearbyAiRecommendations,
+  postItineraryRoute,
+  postScheduleConfirm,
   type AiRecommendationItem,
   type AiRecommendationsResponse,
+  type ItineraryRouteResult,
+  type ItineraryRouteStopInput,
   type SummaryPin,
 } from '../lib/api'
+import { concatPathSegments, itineraryDayColor, legIndicesForStopDay } from '../lib/itineraryPaths'
+import { computeStopDayIndicesFromCart, flattenCartPinsWithLocation } from '../lib/itineraryStopDays'
+import { buildRouteCompactForSchedule, buildVisitDaysFromCart, SCHEDULE_DEFAULT_REGION } from '../lib/schedulePersist'
 
 type NaverLatLng = unknown
 type NaverPoint = unknown
@@ -163,6 +172,7 @@ function recommendationToCartPin(item: AiRecommendationItem, kind: 'food' | 'hot
   return {
     id: `recommendation:${kind}:${item.contentId}`,
     contentId: item.contentId,
+    contentTypeId: kind === 'hotel' ? '32' : null,
     kind: 'tour',
     iconType: 'natural',
     title: item.title,
@@ -185,6 +195,35 @@ function recommendationToCartPin(item: AiRecommendationItem, kind: 'food' | 'hot
     },
     location: item.location,
   }
+}
+
+function isHotelPin(pin: SummaryPin): boolean {
+  if (pin.id.startsWith('recommendation:hotel:')) return true
+  if (pin.kind === 'festival') return false
+  const ct = String(pin.contentTypeId ?? '').trim()
+  if (ct === '32') return true
+  const cat1 = pin.detail?.category?.cat1 ?? ''
+  const cat2 = pin.detail?.category?.cat2 ?? ''
+  const cat3 = pin.detail?.category?.cat3 ?? ''
+  return cat1 === 'B02' || cat2.startsWith('B02') || cat3.includes('B02')
+}
+
+function appendHotelLastEveryDay(
+  days: SummaryPin[][],
+  hotel: SummaryPin,
+  previousTripHotelId: string | null,
+): SummaryPin[][] {
+  return days.map((day) => {
+    let next = day.filter((p) => p.id !== hotel.id)
+    if (previousTripHotelId && previousTripHotelId !== hotel.id) {
+      next = next.filter((p) => p.id !== previousTripHotelId)
+    }
+    return [...next, hotel]
+  })
+}
+
+function isHotelLastOnAllDays(days: SummaryPin[][], hotelId: string): boolean {
+  return days.length > 0 && days.every((day) => day.length > 0 && day[day.length - 1]?.id === hotelId)
 }
 
 const FILTERS = ['전체', '역사/문화', '축제', '시장/쇼핑', '전시/문화시설', '자연/공원'] as const
@@ -390,6 +429,70 @@ function loadStoredCartDays() {
   }
 }
 
+function formatItineraryGeocodeDebug(cause: Record<string, unknown>): string {
+  const lines: string[] = ['', '── Gemini·지오코딩 디버그 ──']
+  const status = cause.geminiHttpStatus
+  if (status === 429) {
+    lines.push(
+      '「HTTP 429」Gemini 무료 한도·요금제 제한일 수 있어요. Google AI Studio에서 사용량/결제를 확인하거나 apps/api/.env의 GEMINI_MODEL을 다른 모델로 바꿔 보세요.',
+    )
+  }
+  if (status === 404) {
+    lines.push(
+      '「HTTP 404」해당 모델 이름이 v1beta generateContent에서 지원되지 않거나 존재하지 않을 수 있어요. GEMINI_MODEL을 gemini-flash-latest 등으로 바꾸거나, List Models로 사용 가능한 이름을 확인하세요.',
+    )
+  }
+  const add = (label: string, v: unknown) => {
+    if (v === undefined || v === null || v === '') return
+    const s = typeof v === 'boolean' ? (v ? '예' : '아니오') : String(v)
+    lines.push(`${label}: ${s}`)
+  }
+  add('출발지(원문)', cause.departureQuery)
+  add('지오코딩에 넣은 문자열', cause.geocodeQueryAttempted)
+  add('지오코딩 재시도(원문)', cause.geocodeFallbackAttempted)
+  add('Gemini 정규화(한 줄)', cause.geminiRoadAddress)
+  add('시도한 Gemini 모델(순서)', cause.geminiModelsTried)
+  if ('geminiRawModelText' in cause) {
+    const t = cause.geminiRawModelText
+    lines.push(`Gemini 모델 원문(성공 시만): ${t === '' || t == null ? '(없음)' : String(t)}`)
+  }
+  add('Gemini HTTP', cause.geminiHttpStatus)
+  add('Gemini API 오류', cause.geminiApiError)
+  if (cause.geminiResponseSnippet != null && String(cause.geminiResponseSnippet).trim() !== '') {
+    lines.push(`Gemini 응답 일부(JSON): ${String(cause.geminiResponseSnippet)}`)
+  }
+  add('Gemini 미사용(키 없음 등)', cause.geminiSkipped)
+  add('Gemini 모델 ID', cause.geminiModel)
+  return lines.join('\n')
+}
+
+function itineraryRouteErrorMessage(code: string) {
+  const map: Record<string, string> = {
+    GEOCODE_NOT_FOUND:
+      '출발지 좌표를 찾지 못했어요. 아래 디버그 정보에서 Gemini 응답·지오코딩에 사용한 문자열을 확인해 주세요.',
+    MAPS_KEYS_NOT_CONFIGURED: '서버에 네이버 지도 API 인증 정보가 없어요. apps/api/.env를 확인해 주세요.',
+    MISSING_NCP_KEY_ID:
+      '서버가 API Gateway 키 ID를 못 찾았어요. apps/api/.env에 Key ID를 두거나, 로컬에서는 apps/web/.env의 X-NCP-APIGW-API-KEY-ID 또는 VITE_X_NCP_APIGW_API_KEY_ID를 씁니다. Client Secret은 브라우저에 넣지 마세요.',
+    MISSING_NCP_SECRET:
+      'Client Secret(인증키)이 없어요. apps/api/.env에 NCP_APIGW_API_KEY 또는 X-NCP-APIGW-API-KEY를 넣어 주세요.',
+    NCP_AUTH_FAILED:
+      '네이버 지도 API 인증에 실패했어요(401). apps/api/.env의 X-NCP-APIGW-API-KEY-ID와 X-NCP-APIGW-API-KEY가 콘솔의 같은 Application에서 나온 쌍인지, 앞뒤 공백·따옴표가 없는지 확인해 주세요. Application에서 Geocoding·Directions 15 사용이 켜져 있는지도 확인해 주세요. (콘솔의 Web 서비스 URL은 브라우저용 지도와 연관된 설정이며, 서버 REST 호출 성공 여부와는 별개입니다.)',
+    INVALID_BODY: '요청 정보가 올바르지 않아요.',
+    UPSTREAM_MAPS_ERROR: '네이버 경로 서버 응답에 문제가 있어요. 잠시 후 다시 시도해 주세요.',
+  }
+  return map[code] ?? `경로를 불러오지 못했어요. (${code})`
+}
+
+function createItineraryDepartureMarkerHtml() {
+  return `<div class="itineraryMapNumMarker itineraryMapNumMarker--dep" aria-hidden="true">출</div>`
+}
+
+function createItineraryOrderMarkerHtml(order: number, dayIndex?: number) {
+  const hue =
+    dayIndex != null ? itineraryDayColor(dayIndex) : order % 2 === 1 ? '#2563eb' : '#7c3aed'
+  return `<div class="itineraryMapNumMarker" style="background:${hue}" aria-hidden="true">${order}</div>`
+}
+
 export function MapPage() {
   const location = useLocation()
   const nav = useNavigate()
@@ -401,6 +504,8 @@ export function MapPage() {
   const [summaryPins, setSummaryPins] = useState<SummaryPin[]>([])
   const [selectedPin, setSelectedPin] = useState<SummaryPin | null>(null)
   const [cartDays, setCartDays] = useState<SummaryPin[][]>(() => loadStoredCartDays())
+  /** 여러 일차 맨 끝에 자동 배치되는 숙소(다른 숙소를 담으면 교체) */
+  const [tripHotelId, setTripHotelId] = useState<string | null>(null)
   const [activeCartDay, setActiveCartDay] = useState(0)
   const [cartPanelOpen, setCartPanelOpen] = useState(true)
   const [draggingPin, setDraggingPin] = useState<{ dayIndex: number; pinId: string } | null>(null)
@@ -415,32 +520,67 @@ export function MapPage() {
   const [aiRecommendationLoading, setAiRecommendationLoading] = useState(false)
   const [aiRecommendationError, setAiRecommendationError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [scheduleModalOpen, setScheduleModalOpen] = useState(false)
+  /** 모달에서 확정한 출발지·시작일 */
+  const [confirmedItineraryBasics, setConfirmedItineraryBasics] = useState<ItineraryScheduleConfirmPayload | null>(null)
+  const [itineraryRoute, setItineraryRoute] = useState<ItineraryRouteResult | null>(null)
+  const [itineraryRouteLoading, setItineraryRouteLoading] = useState(false)
+  const [itineraryRouteError, setItineraryRouteError] = useState<string | null>(null)
+  const [scheduleSaveBusy, setScheduleSaveBusy] = useState(false)
+  const [scheduleSaveFeedback, setScheduleSaveFeedback] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
+  /** 일정 경로가 있을 때 정보 요약 핀을 지도에 다시 표시 */
+  const [itinerarySummaryPinsOn, setItinerarySummaryPinsOn] = useState(false)
 
-  const selectedRange = useMemo(() => (selectedPin ? summaryDateRange(selectedPin) : null), [selectedPin])
+  const stopDayIndices = useMemo(() => {
+    if (!itineraryRoute?.stops?.length) return [] as number[]
+    const raw = computeStopDayIndicesFromCart(cartDays, tripHotelId)
+    return itineraryRoute.stops.map((_, i) => raw[i] ?? 0)
+  }, [cartDays, itineraryRoute, tripHotelId])
+
+  const itineraryPolylinesRef = useRef<Array<{ setMap: (m: NaverMapInstance | null) => void }>>([])
+  const itineraryMarkersRef = useRef<NaverMarkerInstance[]>([])
+  /** 장바구니 순서만 바뀔 때는 fitBounds 생략(줌·팬 유지). 경로·일차 필터가 바뀔 때만 맞춤. */
+  const itineraryFitBoundsKeyRef = useRef<string | null>(null)
+  const [itineraryMapDay, setItineraryMapDay] = useState<number | 'all'>('all')
+  /** 일정이 열려 있을 때 왼쪽 패널: 상세 정보 ↔ 일정 */
+  const [scheduleSideTab, setScheduleSideTab] = useState<'detail' | 'itinerary'>('itinerary')
+
   const selectedAiRecommendations =
     selectedPin && aiRecommendationPinId === selectedPin.id ? aiRecommendations : null
   const filterRangeLabel = useMemo(() => rangeLabel(filterRange.from, filterRange.to), [filterRange])
   const cartPins = useMemo(() => cartDays.flat(), [cartDays])
   const hasCartContent = cartPins.length > 0
+
+  useEffect(() => {
+    if (!tripHotelId) return
+    if (!cartPins.some((p) => p.id === tripHotelId)) setTripHotelId(null)
+  }, [cartPins, tripHotelId])
+
+  /** 로컬 저장 장바구니 등: 숙소가 한 일차에만 있을 때(이전 버전) 최초 한 번만 전 일차 맨 끝으로 맞춤 */
+  const hotelTailSyncMigrated = useRef(false)
+  useEffect(() => {
+    if (hotelTailSyncMigrated.current) return
+    hotelTailSyncMigrated.current = true
+    if (tripHotelId != null) return
+    const days = cartDays
+    if (days.length < 2) return
+    for (let d = 0; d < days.length; d++) {
+      const day = days[d]
+      const last = day[day.length - 1]
+      if (!last || !isHotelPin(last)) continue
+      if (!isHotelLastOnAllDays(days, last.id)) {
+        setTripHotelId(last.id)
+        setCartDays(appendHotelLastEveryDay(days, last, null))
+        return
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- 초기 장바구니 스냅샷만 검사
+  }, [])
+
   const filteredSummaryPins = useMemo(() => {
     if (selectedCategories.includes('전체')) return summaryPins
     return summaryPins.filter((pin) => selectedCategories.includes(categoryForPin(pin)))
   }, [selectedCategories, summaryPins])
-  const itineraryDraft = useMemo(
-    () => ({
-      days: cartDays.map((pins, dayIndex) => ({
-        day: dayIndex + 1,
-        items: pins.map((pin, order) => ({
-          order,
-          id: pin.id,
-          contentId: pin.contentId,
-          kind: pin.kind,
-          title: pin.title,
-        })),
-      })),
-    }),
-    [cartDays],
-  )
 
   const token = useMemo(() => {
     return typeof window !== 'undefined' ? localStorage.getItem('pintravel_token') : null
@@ -460,6 +600,11 @@ export function MapPage() {
   useEffect(() => {
     localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(cartDays))
   }, [cartDays])
+
+  useEffect(() => {
+    if (!selectedPin || !itineraryRoute || !confirmedItineraryBasics) return
+    setScheduleSideTab('detail')
+  }, [selectedPin?.id])
 
   useEffect(() => {
     const ac = new AbortController()
@@ -533,6 +678,16 @@ export function MapPage() {
     })
   }
 
+  useEffect(() => {
+    const pin = selectedPin
+    if (!pin) return
+    const { lat, lng } = pin.location
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return
+    void loadAiRecommendations(pin)
+    // loadAiRecommendations는 항상 동일 동작; selectedPin.id만으로 재요청 여부 결정
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- selectedPin.id
+  }, [selectedPin?.id])
+
   async function loadAiRecommendations(pin: SummaryPin) {
     setAiRecommendationLoading(true)
     setAiRecommendationError(null)
@@ -559,12 +714,162 @@ export function MapPage() {
       requireLogin()
       return
     }
-    setCartDays((days) => {
-      if (days.some((day) => day.some((cartPin) => cartPin.id === pin.id))) return days
-      return days.map((day, index) => (index === activeCartDay ? [...day, pin] : day))
-    })
+    if (isHotelPin(pin)) {
+      const prevHotelId = tripHotelId && tripHotelId !== pin.id ? tripHotelId : null
+      setCartDays((days) => {
+        if (isHotelLastOnAllDays(days, pin.id)) return days
+        return appendHotelLastEveryDay(days, pin, prevHotelId)
+      })
+      setTripHotelId(pin.id)
+    } else {
+      setCartDays((days) => {
+        if (days.some((day) => day.some((cartPin) => cartPin.id === pin.id))) return days
+        return days.map((day, index) => (index === activeCartDay ? [...day, pin] : day))
+      })
+    }
     setCartPanelOpen(true)
-    void loadAiRecommendations(pin)
+  }
+
+  function renderPinAiRecommendSection() {
+    const pin = selectedPin
+    if (!pin) return null
+    return (
+      <section className="mapAiRecommendPanel" aria-label="AI 추천 식당 및 숙소">
+        <h2>AI 추천(식당/숙소)</h2>
+        <p className="mapAiRecommendHelp">장소를 담으면 반경 1km부터 최대 3km까지 가까운 순서로 추천해요.</p>
+
+        {aiRecommendationLoading && aiRecommendationPinId === pin.id ? (
+          <div className="mapAiRecommendState">주변 추천을 불러오는 중이에요.</div>
+        ) : null}
+        {aiRecommendationError && aiRecommendationPinId === pin.id ? (
+          <div className="mapAiRecommendError">{aiRecommendationError}</div>
+        ) : null}
+
+        {selectedAiRecommendations ? (
+          <>
+            <div className="mapAiRecommendGroup">
+              <h3>주변 식당 추천</h3>
+              {selectedAiRecommendations.food.items.length ? (
+                selectedAiRecommendations.food.items.map((item) => (
+                  <article key={`food:${item.contentId}`} className="mapAiRecommendItem">
+                    <div className="mapAiRecommendThumb">
+                      {item.image ? <img src={item.image} alt="" /> : <div className="thumbFallback" />}
+                    </div>
+                    <div className="mapAiRecommendBody">
+                      <div className="mapAiRecommendTitle">{item.title}</div>
+                      <div className="mapAiRecommendMeta">{formatDistance(item.distanceMeters)}</div>
+                      <div className="mapAiRecommendDesc">{recommendationAddressText(item)}</div>
+                      <button
+                        className="mapAiRecommendAddBtn"
+                        type="button"
+                        disabled={!item.location || cartPins.some((p) => p.id === `recommendation:food:${item.contentId}`)}
+                        onClick={() => addRecommendationToCart(item, 'food')}
+                      >
+                        {cartPins.some((p) => p.id === `recommendation:food:${item.contentId}`)
+                          ? '담긴 장소'
+                          : '장소 담기'}
+                      </button>
+                    </div>
+                  </article>
+                ))
+              ) : (
+                <div className="mapAiRecommendState">3km 안에 추천할 식당이 없어요.</div>
+              )}
+            </div>
+
+            <div className="mapAiRecommendGroup">
+              <h3>주변 숙소 추천</h3>
+              {selectedAiRecommendations.hotel.items.length ? (
+                selectedAiRecommendations.hotel.items.map((item) => (
+                  <article key={`hotel:${item.contentId}`} className="mapAiRecommendItem">
+                    <div className="mapAiRecommendThumb">
+                      {item.image ? <img src={item.image} alt="" /> : <div className="thumbFallback" />}
+                    </div>
+                    <div className="mapAiRecommendBody">
+                      <div className="mapAiRecommendTitle">{item.title}</div>
+                      <div className="mapAiRecommendMeta">{formatDistance(item.distanceMeters)}</div>
+                      <div className="mapAiRecommendDesc">{recommendationAddressText(item)}</div>
+                      <button
+                        className="mapAiRecommendAddBtn"
+                        type="button"
+                        disabled={!item.location || cartPins.some((p) => p.id === `recommendation:hotel:${item.contentId}`)}
+                        onClick={() => addRecommendationToCart(item, 'hotel')}
+                      >
+                        {cartPins.some((p) => p.id === `recommendation:hotel:${item.contentId}`)
+                          ? '담긴 장소'
+                          : '장소 담기'}
+                      </button>
+                    </div>
+                  </article>
+                ))
+              ) : (
+                <div className="mapAiRecommendState">3km 안에 추천할 숙소가 없어요.</div>
+              )}
+            </div>
+          </>
+        ) : !aiRecommendationLoading ? (
+          <div className="mapAiRecommendState">장소 담기 버튼을 누르면 주변 추천이 표시돼요.</div>
+        ) : null}
+      </section>
+    )
+  }
+
+  function renderSelectedPinDetailBlocks() {
+    const pin = selectedPin
+    if (!pin) return null
+    return (
+      <>
+        <div className="mapDetailHero">
+          {detailImageUrl(pin) ? (
+            <img src={detailImageUrl(pin) ?? ''} alt={pin.title} />
+          ) : (
+            <img className="mapDetailFallbackIcon" src={iconUrlForPin(pin)} alt="" />
+          )}
+        </div>
+        <div className="mapDetailBody">
+          <h1>{pin.title}</h1>
+          <dl className="mapDetailInfo">
+            <div>
+              <dt>주소</dt>
+              <dd>{addressText(pin)}</dd>
+            </div>
+            {pin.zipcode ? (
+              <div>
+                <dt>우편</dt>
+                <dd>{pin.zipcode}</dd>
+              </div>
+            ) : null}
+            <div>
+              <dt>{pin.kind === 'festival' ? '장소' : '주차'}</dt>
+              <dd>{placeLabel(pin)}</dd>
+            </div>
+            <div>
+              <dt>{pin.kind === 'festival' ? '기간' : '운영'}</dt>
+              <dd>{summaryDateRange(pin)}</dd>
+            </div>
+            {pin.kind === 'tour' ? (
+              <div>
+                <dt>휴무</dt>
+                <dd>{compactText(pin.summary.restDate, '휴무 정보 없음')}</dd>
+              </div>
+            ) : null}
+            <div>
+              <dt>요금</dt>
+              <dd>{compactText(pin.summary.fee, '요금 정보 없음')}</dd>
+            </div>
+            <div>
+              <dt>문의</dt>
+              <dd>{contactText(pin)}</dd>
+            </div>
+          </dl>
+          <p className="mapDetailOverview">{overviewText(pin)}</p>
+          <button type="button" onClick={addSelectedPinToCart}>
+            {cartPins.some((p) => p.id === pin.id) ? '담긴 장소' : '장소 담기'}
+          </button>
+          {renderPinAiRecommendSection()}
+        </div>
+      </>
+    )
   }
 
   function addRecommendationToCart(item: AiRecommendationItem, kind: 'food' | 'hotel') {
@@ -576,10 +881,19 @@ export function MapPage() {
     const pin = recommendationToCartPin(item, kind)
     if (!pin) return
 
-    setCartDays((days) => {
-      if (days.some((day) => day.some((cartPin) => cartPin.id === pin.id))) return days
-      return days.map((day, index) => (index === activeCartDay ? [...day, pin] : day))
-    })
+    if (kind === 'hotel') {
+      const prevHotelId = tripHotelId && tripHotelId !== pin.id ? tripHotelId : null
+      setCartDays((days) => {
+        if (isHotelLastOnAllDays(days, pin.id)) return days
+        return appendHotelLastEveryDay(days, pin, prevHotelId)
+      })
+      setTripHotelId(pin.id)
+    } else {
+      setCartDays((days) => {
+        if (days.some((day) => day.some((cartPin) => cartPin.id === pin.id))) return days
+        return days.map((day, index) => (index === activeCartDay ? [...day, pin] : day))
+      })
+    }
     setCartPanelOpen(true)
   }
 
@@ -589,7 +903,16 @@ export function MapPage() {
 
   function addCartDay() {
     const nextDayIndex = cartDays.length
-    setCartDays((days) => [...days, []])
+    const hid = tripHotelId
+    setCartDays((days) => {
+      const next = [...days, []]
+      const lastIdx = next.length - 1
+      if (hid) {
+        const hotel = days.flat().find((p) => p.id === hid)
+        if (hotel) next[lastIdx] = [hotel]
+      }
+      return next
+    })
     setActiveCartDay(nextDayIndex)
   }
 
@@ -620,6 +943,101 @@ export function MapPage() {
     })
     setActiveCartDay(targetDayIndex)
     setDraggingPin(null)
+  }
+
+  function clearItineraryRoute() {
+    setItineraryRoute(null)
+    setItineraryRouteError(null)
+    setConfirmedItineraryBasics(null)
+    setItineraryMapDay('all')
+    setItinerarySummaryPinsOn(false)
+    setScheduleSideTab('itinerary')
+    setScheduleSaveFeedback(null)
+  }
+
+  async function fetchItineraryRouteForDeparture(departure: string) {
+    const pins = flattenCartPinsWithLocation(cartDays, tripHotelId)
+    if (pins.length === 0) {
+      setItineraryRouteError('좌표가 있는 장소가 장바구니에 없어요.')
+      return
+    }
+
+    const stops: ItineraryRouteStopInput[] = pins.map((p) => ({
+      lat: p.location.lat,
+      lng: p.location.lng,
+      title: compactText(p.title, '이름 없음'),
+      contentId: p.contentId,
+      fee: p.summary?.fee ?? null,
+      time: p.summary?.time ?? p.summary?.restDate ?? null,
+      kind: p.kind,
+    }))
+
+    setItineraryRouteError(null)
+    setItineraryRouteLoading(true)
+    try {
+      const route = await postItineraryRoute({ departureQuery: departure, stops })
+      setItineraryRoute(route)
+      setScheduleSaveFeedback(null)
+      setSelectedPin(null)
+    } catch (err) {
+      const code = err instanceof Error ? err.message : 'ROUTE_FAILED'
+      const cause =
+        err instanceof Error ? (err as Error & { cause?: Record<string, unknown> }).cause : undefined
+      let message = itineraryRouteErrorMessage(code)
+      if (code === 'GEOCODE_NOT_FOUND' && cause && typeof cause === 'object') {
+        message += formatItineraryGeocodeDebug(cause as Record<string, unknown>)
+      }
+      setItineraryRouteError(message)
+    } finally {
+      setItineraryRouteLoading(false)
+    }
+  }
+
+  async function handleItineraryScheduleConfirm(payload: ItineraryScheduleConfirmPayload) {
+    setScheduleModalOpen(false)
+    setConfirmedItineraryBasics(payload)
+    setItineraryRoute(null)
+    setItineraryRouteError(null)
+    setItineraryMapDay('all')
+    setItinerarySummaryPinsOn(false)
+
+    await fetchItineraryRouteForDeparture(payload.departure)
+  }
+
+  function handleCartItineraryPrimaryClick() {
+    if (itineraryRoute && confirmedItineraryBasics) {
+      void fetchItineraryRouteForDeparture(confirmedItineraryBasics.departure)
+      return
+    }
+    setScheduleModalOpen(true)
+  }
+
+  async function handleConfirmScheduleClick() {
+    if (!itineraryRoute || !confirmedItineraryBasics) return
+    const authToken = typeof window !== 'undefined' ? localStorage.getItem('pintravel_token') : null
+    if (!authToken) {
+      requireLogin()
+      return
+    }
+    setScheduleSaveFeedback(null)
+    setScheduleSaveBusy(true)
+    try {
+      await postScheduleConfirm({
+        region: SCHEDULE_DEFAULT_REGION,
+        tripStartDate: confirmedItineraryBasics.tripStartDate,
+        departure: confirmedItineraryBasics.departure,
+        tripHotelId,
+        visitDays: buildVisitDaysFromCart(cartDays, confirmedItineraryBasics.tripStartDate),
+        ...buildRouteCompactForSchedule(itineraryRoute),
+      })
+      setScheduleSaveFeedback({ kind: 'ok', text: '일정이 저장되었어요.' })
+    } catch (err) {
+      const code = err instanceof Error ? err.message : 'FAILED'
+      if (code === 'UNAUTHORIZED') requireLogin()
+      else setScheduleSaveFeedback({ kind: 'error', text: '일정 저장에 실패했어요. 잠시 후 다시 시도해 주세요.' })
+    } finally {
+      setScheduleSaveBusy(false)
+    }
   }
 
   useEffect(() => {
@@ -675,6 +1093,15 @@ export function MapPage() {
       const zoom = mapInstance.getZoom()
       setZoomLevel(zoom)
       console.log('[PinTravel map] zoom level:', zoom)
+      /** 기본: 경로·번호 마커만. 장소 핀 ON이면 요약 핀·클러스터도 표시 */
+      if (
+        itineraryRoute != null &&
+        itineraryRoute.path.length > 0 &&
+        !itinerarySummaryPinsOn
+      ) {
+        return
+      }
+
       const pinsInView = visiblePins()
       if (pinsInView.length === 0) return
 
@@ -761,26 +1188,214 @@ export function MapPage() {
       markerListenersRef.current = []
       clearMarkers()
     }
-  }, [filteredSummaryPins, mapReady])
+  }, [filteredSummaryPins, mapReady, itineraryRoute, itinerarySummaryPinsOn])
+
+  useEffect(() => {
+    const maps = getNaverMaps() as unknown as {
+      LatLng: new (lat: number, lng: number) => NaverLatLng
+      Point: new (x: number, y: number) => NaverPoint
+      Size: new (w: number, h: number) => NaverSize
+      Polyline: new (opts: {
+        map: NaverMapInstance
+        path: NaverLatLng[]
+        strokeColor?: string
+        strokeWeight?: number
+        strokeOpacity?: number
+        strokeStyle?: string
+        strokeLineCap?: string
+        strokeLineJoin?: string
+      }) => { setMap: (m: NaverMapInstance | null) => void }
+      LatLngBounds: new () => { extend: (ll: NaverLatLng) => void }
+      Marker: new (options: {
+        position: NaverLatLng
+        map: NaverMapInstance
+        icon?: { content: string; size: NaverSize; anchor: NaverPoint }
+      }) => NaverMarkerInstance
+    }
+    const map = mapRef.current
+    if (!mapReady || !maps || !map) return
+
+    itineraryPolylinesRef.current.forEach((p) => p.setMap(null))
+    itineraryPolylinesRef.current = []
+    itineraryMarkersRef.current.forEach((m) => m.setMap(null))
+    itineraryMarkersRef.current = []
+
+    if (!itineraryRoute?.path?.length) {
+      itineraryFitBoundsKeyRef.current = null
+      return
+    }
+
+    const route = itineraryRoute
+    const nStops = route.stops.length
+    const stopDay =
+      stopDayIndices.length === nStops ? stopDayIndices : route.stops.map((_, i) => stopDayIndices[i] ?? 0)
+
+    const legPathsRaw = route.legPaths
+    const legsOk =
+      Array.isArray(legPathsRaw) && legPathsRaw.length === route.legs.length && route.legs.length > 0
+
+    const boundsPaths: NaverLatLng[][] = []
+    const pushPolyline = (pathPts: NaverLatLng[], strokeColor: string) => {
+      if (pathPts.length < 2) return
+      boundsPaths.push(pathPts)
+      const pl = new maps.Polyline({
+        map,
+        path: pathPts,
+        strokeColor,
+        strokeOpacity: 0.9,
+        strokeWeight: 5,
+        strokeStyle: 'shortdash',
+        strokeLineCap: 'round',
+        strokeLineJoin: 'round',
+      })
+      itineraryPolylinesRef.current.push(pl)
+    }
+
+    if (!legsOk) {
+      if (itineraryMapDay === 'all') {
+        const pathPts = route.path.map((p) => new maps.LatLng(p.lat, p.lng))
+        pushPolyline(pathPts, '#111827')
+      }
+    } else if (itineraryMapDay === 'all') {
+      for (let j = 0; j < legPathsRaw.length; j++) {
+        const seg = legPathsRaw[j] ?? []
+        const pathPts = seg.map((p) => new maps.LatLng(p.lat, p.lng))
+        const color = itineraryDayColor(stopDay[j] ?? 0)
+        pushPolyline(pathPts, color)
+      }
+    } else {
+      const D = itineraryMapDay
+      const idx = legIndicesForStopDay(stopDay, D)
+      const segs = idx.map((j) => legPathsRaw[j] ?? []).filter((s) => s.length > 0)
+      const merged = concatPathSegments(
+        segs.map((seg) => seg.map((p) => ({ lat: p.lat, lng: p.lng }))),
+      )
+      const pathPts = merged.map((p) => new maps.LatLng(p.lat, p.lng))
+      pushPolyline(pathPts, itineraryDayColor(D))
+    }
+
+    const dep = route.departure
+    const markerPositions: NaverLatLng[] = []
+
+    const pushMarker = (ll: NaverLatLng, html: string) => {
+      markerPositions.push(ll)
+      itineraryMarkersRef.current.push(
+        new maps.Marker({
+          position: ll,
+          map,
+          icon: {
+            content: html,
+            size: new maps.Size(32, 32),
+            anchor: new maps.Point(16, 16),
+          },
+        }),
+      )
+    }
+
+    if (!legsOk || itineraryMapDay === 'all') {
+      pushMarker(new maps.LatLng(dep.lat, dep.lng), createItineraryDepartureMarkerHtml())
+      route.stops.forEach((s) => {
+        const d = stopDay[s.order - 1] ?? 0
+        pushMarker(
+          new maps.LatLng(s.lat, s.lng),
+          createItineraryOrderMarkerHtml(s.order, legsOk ? d : undefined),
+        )
+      })
+    } else {
+      const D = itineraryMapDay
+      const firstIdx = legIndicesForStopDay(stopDay, D)[0]
+      if (firstIdx === 0) {
+        pushMarker(new maps.LatLng(dep.lat, dep.lng), createItineraryDepartureMarkerHtml())
+      }
+      route.stops.forEach((s) => {
+        const d = stopDay[s.order - 1] ?? 0
+        if (d !== D) return
+        pushMarker(new maps.LatLng(s.lat, s.lng), createItineraryOrderMarkerHtml(s.order, D))
+      })
+    }
+
+    const bounds = new maps.LatLngBounds()
+    boundsPaths.flat().forEach((ll) => bounds.extend(ll))
+    markerPositions.forEach((ll) => bounds.extend(ll))
+    const fit = (map as NaverMapInstance & { fitBounds?: (b: unknown) => void }).fitBounds
+
+    const path0 = route.path[0]
+    const pathN = route.path[route.path.length - 1]
+    const fitKey = [
+      route.path.length,
+      route.totalDistanceM,
+      route.totalDurationMs,
+      route.legs.length,
+      path0?.lat,
+      path0?.lng,
+      pathN?.lat,
+      pathN?.lng,
+      itineraryMapDay,
+    ].join('|')
+    const shouldFitBounds = itineraryFitBoundsKeyRef.current !== fitKey
+    if (shouldFitBounds) itineraryFitBoundsKeyRef.current = fitKey
+
+    if (
+      shouldFitBounds &&
+      (boundsPaths.length > 0 || markerPositions.length > 0)
+    ) {
+      if (typeof fit === 'function') {
+        fit.call(map, bounds)
+      } else if (boundsPaths[0]?.[0]) {
+        map.setCenter(boundsPaths[0][Math.floor(boundsPaths[0].length / 2)])
+        map.setZoom?.(12)
+      } else if (markerPositions[0]) {
+        map.setCenter(markerPositions[0])
+        map.setZoom?.(12)
+      }
+    }
+
+    return () => {
+      itineraryPolylinesRef.current.forEach((p) => p.setMap(null))
+      itineraryPolylinesRef.current = []
+      itineraryMarkersRef.current.forEach((m) => m.setMap(null))
+      itineraryMarkersRef.current = []
+    }
+  }, [itineraryRoute, mapReady, itineraryMapDay, stopDayIndices])
 
   return (
     <section className="mapPage">
       <div ref={mapElementRef} className="mapCanvas" />
 
-      <div className="mapFilterChips" aria-label="카테고리 필터">
-        {MAP_FILTERS.map((filter) => (
+      <div className="mapFilterChips" aria-label="카테고리 및 장소 핀">
+        <div className="mapFilterChipsInner">
+          {MAP_FILTERS.map((filter) => (
+            <button
+              key={filter}
+              className={`mapChip ${selectedCategories.includes(filter) ? 'mapChip--selected' : ''}`}
+              type="button"
+              style={
+                selectedCategories.includes(filter) ? MAP_CHIP_SELECTED_STYLE[filter] : undefined
+              }
+              onClick={() => toggleCategory(filter)}
+            >
+              {filter}
+            </button>
+          ))}
+        </div>
+        {itineraryRoute != null && itineraryRoute.path.length > 0 ? (
           <button
-            key={filter}
-            className={`mapChip ${selectedCategories.includes(filter) ? 'mapChip--selected' : ''}`}
             type="button"
-            style={
-              selectedCategories.includes(filter) ? MAP_CHIP_SELECTED_STYLE[filter] : undefined
-            }
-            onClick={() => toggleCategory(filter)}
+            className={`mapPinToggle ${itinerarySummaryPinsOn ? 'mapPinToggle--on' : ''}`}
+            aria-pressed={itinerarySummaryPinsOn}
+            aria-label="정보 요약 장소 핀 표시"
+            title="일정을 보면서 장소를 고르거나 장바구니를 수정할 수 있어요"
+            onClick={() => {
+              setItinerarySummaryPinsOn((v) => {
+                const next = !v
+                if (!next) setSelectedPin(null)
+                return next
+              })
+            }}
           >
-            {filter}
+            장소 핀 {itinerarySummaryPinsOn ? 'ON' : 'OFF'}
           </button>
-        ))}
+        ) : null}
       </div>
 
       {calendarOpen ? (
@@ -832,135 +1447,64 @@ export function MapPage() {
         줌 레벨: {zoomLevel ?? '-'}
       </div>
 
-      {selectedPin ? (
+      {selectedPin && !itineraryRoute ? (
         <aside className="mapDetailPanel" aria-label="상세 정보">
           <button className="mapDetailTab" type="button">
             상세 정보
           </button>
-          <div className="mapDetailHero">
-            {detailImageUrl(selectedPin) ? (
-              <img src={detailImageUrl(selectedPin) ?? ''} alt={selectedPin.title} />
-            ) : (
-              <img className="mapDetailFallbackIcon" src={iconUrlForPin(selectedPin)} alt="" />
-            )}
-          </div>
-          <div className="mapDetailBody">
-            <h1>{selectedPin.title}</h1>
-            <dl className="mapDetailInfo">
-              <div>
-                <dt>주소</dt>
-                <dd>{addressText(selectedPin)}</dd>
-              </div>
-              {selectedPin.zipcode ? (
-                <div>
-                  <dt>우편</dt>
-                  <dd>{selectedPin.zipcode}</dd>
-                </div>
-              ) : null}
-              <div>
-                <dt>{selectedPin.kind === 'festival' ? '장소' : '주차'}</dt>
-                <dd>{placeLabel(selectedPin)}</dd>
-              </div>
-              <div>
-                <dt>{selectedPin.kind === 'festival' ? '기간' : '운영'}</dt>
-                <dd>{selectedRange}</dd>
-              </div>
-              {selectedPin.kind === 'tour' ? (
-                <div>
-                  <dt>휴무</dt>
-                  <dd>{compactText(selectedPin.summary.restDate, '휴무 정보 없음')}</dd>
-                </div>
-              ) : null}
-              <div>
-                <dt>요금</dt>
-                <dd>{compactText(selectedPin.summary.fee, '요금 정보 없음')}</dd>
-              </div>
-              <div>
-                <dt>문의</dt>
-                <dd>{contactText(selectedPin)}</dd>
-              </div>
-            </dl>
-            <p className="mapDetailOverview">{overviewText(selectedPin)}</p>
-            <button type="button" onClick={addSelectedPinToCart}>
-              {cartPins.some((pin) => pin.id === selectedPin.id) ? '담긴 장소' : '장소 담기'}
+          {renderSelectedPinDetailBlocks()}
+        </aside>
+      ) : null}
+
+      {itineraryRoute && confirmedItineraryBasics ? (
+        <aside className="mapSideTabPanel" aria-label="일정 및 장소 정보">
+          <div className="mapSideTabPanelHeader">
+            <span className="mapSideTabPanelHeaderSpacer" />
+            <button type="button" className="mapItineraryClose" aria-label="일정 패널 닫기" onClick={clearItineraryRoute}>
+              ×
             </button>
-            <section className="mapAiRecommendPanel" aria-label="AI 추천 식당 및 숙소">
-              <h2>AI 추천(식당/숙소)</h2>
-              <p className="mapAiRecommendHelp">장소를 담으면 반경 1km부터 최대 3km까지 가까운 순서로 추천해요.</p>
-
-              {aiRecommendationLoading && aiRecommendationPinId === selectedPin.id ? (
-                <div className="mapAiRecommendState">주변 추천을 불러오는 중이에요.</div>
-              ) : null}
-              {aiRecommendationError && aiRecommendationPinId === selectedPin.id ? (
-                <div className="mapAiRecommendError">{aiRecommendationError}</div>
-              ) : null}
-
-              {selectedAiRecommendations ? (
-                <>
-                  <div className="mapAiRecommendGroup">
-                    <h3>주변 식당 추천</h3>
-                    {selectedAiRecommendations.food.items.length ? (
-                      selectedAiRecommendations.food.items.map((item) => (
-                        <article key={`food:${item.contentId}`} className="mapAiRecommendItem">
-                          <div className="mapAiRecommendThumb">
-                            {item.image ? <img src={item.image} alt="" /> : <div className="thumbFallback" />}
-                          </div>
-                          <div className="mapAiRecommendBody">
-                            <div className="mapAiRecommendTitle">{item.title}</div>
-                            <div className="mapAiRecommendMeta">{formatDistance(item.distanceMeters)}</div>
-                            <div className="mapAiRecommendDesc">{recommendationAddressText(item)}</div>
-                            <button
-                              className="mapAiRecommendAddBtn"
-                              type="button"
-                              disabled={!item.location || cartPins.some((pin) => pin.id === `recommendation:food:${item.contentId}`)}
-                              onClick={() => addRecommendationToCart(item, 'food')}
-                            >
-                              {cartPins.some((pin) => pin.id === `recommendation:food:${item.contentId}`)
-                                ? '담긴 장소'
-                                : '장소 담기'}
-                            </button>
-                          </div>
-                        </article>
-                      ))
-                    ) : (
-                      <div className="mapAiRecommendState">3km 안에 추천할 식당이 없어요.</div>
-                    )}
-                  </div>
-
-                  <div className="mapAiRecommendGroup">
-                    <h3>주변 숙소 추천</h3>
-                    {selectedAiRecommendations.hotel.items.length ? (
-                      selectedAiRecommendations.hotel.items.map((item) => (
-                        <article key={`hotel:${item.contentId}`} className="mapAiRecommendItem">
-                          <div className="mapAiRecommendThumb">
-                            {item.image ? <img src={item.image} alt="" /> : <div className="thumbFallback" />}
-                          </div>
-                          <div className="mapAiRecommendBody">
-                            <div className="mapAiRecommendTitle">{item.title}</div>
-                            <div className="mapAiRecommendMeta">{formatDistance(item.distanceMeters)}</div>
-                            <div className="mapAiRecommendDesc">{recommendationAddressText(item)}</div>
-                            <button
-                              className="mapAiRecommendAddBtn"
-                              type="button"
-                              disabled={!item.location || cartPins.some((pin) => pin.id === `recommendation:hotel:${item.contentId}`)}
-                              onClick={() => addRecommendationToCart(item, 'hotel')}
-                            >
-                              {cartPins.some((pin) => pin.id === `recommendation:hotel:${item.contentId}`)
-                                ? '담긴 장소'
-                                : '장소 담기'}
-                            </button>
-                          </div>
-                        </article>
-                      ))
-                    ) : (
-                      <div className="mapAiRecommendState">3km 안에 추천할 숙소가 없어요.</div>
-                    )}
-                  </div>
-                </>
-              ) : !aiRecommendationLoading ? (
-                <div className="mapAiRecommendState">장소 담기 버튼을 누르면 주변 추천이 표시돼요.</div>
-              ) : null}
-            </section>
+          </div>
+          <div className="mapSideTabBar" role="tablist" aria-label="보기 전환">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={scheduleSideTab === 'detail'}
+              className={`mapSideTab ${scheduleSideTab === 'detail' ? 'mapSideTab--active' : ''}`}
+              onClick={() => setScheduleSideTab('detail')}
+            >
+              상세 정보
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={scheduleSideTab === 'itinerary'}
+              className={`mapSideTab ${scheduleSideTab === 'itinerary' ? 'mapSideTab--active' : ''}`}
+              onClick={() => setScheduleSideTab('itinerary')}
+            >
+              일정
+            </button>
+          </div>
+          <div className="mapSideTabPanelScroll">
+            {scheduleSideTab === 'detail' ? (
+              selectedPin ? (
+                renderSelectedPinDetailBlocks()
+              ) : (
+                <div className="mapSideTabEmpty">
+                  상단에서 <strong>장소 핀 ON</strong> 후 지도에서 핀을 누르면 여기에 상세 정보가 표시돼요.
+                </div>
+              )
+            ) : (
+              <ItineraryRoutePanel
+                embedded
+                tripStartDate={confirmedItineraryBasics.tripStartDate}
+                route={itineraryRoute}
+                cartDays={cartDays}
+                tripHotelId={tripHotelId}
+                selectedMapItineraryDay={itineraryMapDay}
+                onSelectMapItineraryDay={setItineraryMapDay}
+                onClose={clearItineraryRoute}
+              />
+            )}
           </div>
         </aside>
       ) : null}
@@ -1029,10 +1573,72 @@ export function MapPage() {
             +
           </button>
 
-          <button className="mapCartCreateBtn" type="button" onClick={() => console.log('[PinTravel itinerary draft]', itineraryDraft)}>
-            일정 생성
-          </button>
+          <div className="mapCartFooterBtns">
+            {itineraryRoute && confirmedItineraryBasics ? (
+              <>
+                <button
+                  className="mapCartRegenerateBtn"
+                  type="button"
+                  disabled={itineraryRouteLoading || scheduleSaveBusy}
+                  aria-label="수정된 장바구니로 일정 경로 다시 계산"
+                  title="장바구니 변경을 반영해 경로를 다시 계산해요"
+                  onClick={handleCartItineraryPrimaryClick}
+                >
+                  재생성
+                </button>
+                <button
+                  className="mapCartConfirmBtn"
+                  type="button"
+                  disabled={itineraryRouteLoading || scheduleSaveBusy}
+                  aria-label="확정 일정을 서버에 저장"
+                  onClick={() => void handleConfirmScheduleClick()}
+                >
+                  일정 확정
+                </button>
+              </>
+            ) : (
+              <button
+                className="mapCartCreateBtn"
+                type="button"
+                disabled={itineraryRouteLoading}
+                aria-label="출발지와 시작일을 입력해 일정 생성"
+                onClick={handleCartItineraryPrimaryClick}
+              >
+                일정 생성
+              </button>
+            )}
+          </div>
+          {scheduleSaveFeedback ? (
+            <p
+              className={`mapCartSaveHint ${scheduleSaveFeedback.kind === 'error' ? 'mapCartSaveHintError' : ''}`}
+              role="status"
+            >
+              {scheduleSaveFeedback.text}
+            </p>
+          ) : null}
         </aside>
+      ) : null}
+
+      <ItineraryScheduleModal
+        open={scheduleModalOpen}
+        defaultTripStartDate={filterRange.from}
+        onClose={() => setScheduleModalOpen(false)}
+        onConfirm={handleItineraryScheduleConfirm}
+      />
+
+      {itineraryRouteLoading ? (
+        <div className="mapItineraryLoading" role="status">
+          경로를 계산하는 중이에요…
+        </div>
+      ) : null}
+
+      {itineraryRouteError ? (
+        <div className="mapItineraryError" role="alert">
+          <span className="mapItineraryErrorText">{itineraryRouteError}</span>
+          <button type="button" className="mapItineraryErrorDismiss" onClick={() => setItineraryRouteError(null)}>
+            닫기
+          </button>
+        </div>
       ) : null}
 
       {error ? (

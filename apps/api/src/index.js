@@ -7,12 +7,23 @@ import http from "http";
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { registerRoutes } from "./routes/index.js";
 import { attachSocketServer } from "./realtime/socket.js";
 import { closeMongo, connectMongo } from "./storage/mongo.js";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+/** cwd와 무관하게 `apps/api/.env`를 우선 로드한 뒤, cwd의 `.env`로 보완 */
+const pkgEnvPath = path.resolve(__dirname, "../.env");
+dotenv.config({ path: pkgEnvPath });
 dotenv.config();
+
+if (process.env.NODE_ENV !== "production") {
+  console.log(`[api] dotenv: package=${pkgEnvPath} (${existsSync(pkgEnvPath) ? "found" : "missing"}) cwd=${process.cwd()}`);
+}
 
 async function main() {
   const { db } = await connectMongo();

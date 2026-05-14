@@ -85,6 +85,7 @@ function placeSummaryPin(place) {
   return {
     id: `tour:${place.contentId}`,
     contentId: place.contentId,
+    contentTypeId: place.contentTypeId ?? null,
     kind: "tour",
     iconType: placeIconType(place),
     title: place.title,
@@ -183,6 +184,7 @@ mapRouter.get("/summary-pins", async (req, res) => {
             projection: {
               _id: 0,
               contentId: 1,
+              contentTypeId: 1,
               title: 1,
               category: 1,
               address: 1,

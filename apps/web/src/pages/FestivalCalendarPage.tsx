@@ -3,6 +3,15 @@ import { useNavigate } from 'react-router-dom'
 
 import { HomeLandingHeader } from '../components/HomeLandingHeader'
 import { fetchFestivalDayCounts, fetchFestivalsByDay, type FestivalListItem } from '../lib/api'
+import {
+  festivalPassesCalendarFilters,
+  festivalParkingPossible,
+  festivalRegionLabel,
+  festivalTimeSlotLabel,
+  sortedRegionOptions,
+  type CalendarParkingFilter,
+  type CalendarTimeSlotFilter,
+} from '../lib/calendarFestivalFilters'
 
 type CalendarCell = {
   date: string // YYYY-MM-DD
@@ -90,7 +99,27 @@ export function FestivalCalendarPage() {
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState(false)
 
+  const [filterRegion, setFilterRegion] = useState<string>('all')
+  const [filterTimeSlot, setFilterTimeSlot] = useState<CalendarTimeSlotFilter>('all')
+  const [filterParking, setFilterParking] = useState<CalendarParkingFilter>('all')
+
   const cells = useMemo(() => buildCalendarCells(year, month), [year, month])
+
+  const regionOptions = useMemo(() => sortedRegionOptions(festivals), [festivals])
+
+  /** 날짜를 바꿔도 지역 필터 값은 유지; 해당 일 목록에 없는 지역이면 셀렉트에만 남김 */
+  const regionSelectOptions = useMemo(() => {
+    if (filterRegion !== 'all' && !regionOptions.includes(filterRegion)) {
+      return [...regionOptions, filterRegion].sort((a, b) => a.localeCompare(b, 'ko'))
+    }
+    return regionOptions
+  }, [regionOptions, filterRegion])
+
+  const filteredFestivals = useMemo(() => {
+    return festivals
+      .filter((f) => festivalPassesCalendarFilters(f, filterRegion, filterTimeSlot, filterParking))
+      .sort((a, b) => a.title.localeCompare(b.title, 'ko'))
+  }, [festivals, filterRegion, filterTimeSlot, filterParking])
 
   useEffect(() => {
     const ac = new AbortController()
@@ -125,9 +154,18 @@ export function FestivalCalendarPage() {
   }, [selectedDate])
 
   useEffect(() => {
-    // 날짜를 바꾸면 기본(2분할 + 4개 미리보기)로 복귀
+    // 날짜를 바꾸면 리스트 접힘만 초기화(필터는 유지)
     setExpanded(false)
   }, [selectedDate])
+
+  function resetFilters() {
+    setFilterRegion('all')
+    setFilterTimeSlot('all')
+    setFilterParking('all')
+  }
+
+  const filtersActive =
+    filterRegion !== 'all' || filterTimeSlot !== 'all' || filterParking !== 'all'
 
   function goMonth(delta: number) {
     const d = new Date(year, month - 1 + delta, 1)
@@ -232,15 +270,71 @@ export function FestivalCalendarPage() {
             </div>
           </div>
 
+          {!loadingList ? (
+            <div className="calendarFilters">
+              <div className="calendarFiltersMain" role="group" aria-label="축제 필터">
+                <label className="calendarFilterField">
+                  <span className="calendarFilterLabel">지역</span>
+                  <select
+                    className="calendarFilterSelect"
+                    value={filterRegion}
+                    onChange={(e) => setFilterRegion(e.target.value)}
+                  >
+                    <option value="all">전체</option>
+                    {regionSelectOptions.map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="calendarFilterField">
+                  <span className="calendarFilterLabel">시간대</span>
+                  <select
+                    className="calendarFilterSelect"
+                    value={filterTimeSlot}
+                    onChange={(e) => setFilterTimeSlot(e.target.value as CalendarTimeSlotFilter)}
+                  >
+                    <option value="all">전체</option>
+                    <option value="morning">오전 (12시 미만 운영)</option>
+                    <option value="afternoon">오후 (12시 이후 운영)</option>
+                  </select>
+                </label>
+                <label className="calendarFilterField">
+                  <span className="calendarFilterLabel">주차</span>
+                  <select
+                    className="calendarFilterSelect"
+                    value={filterParking}
+                    onChange={(e) => setFilterParking(e.target.value as CalendarParkingFilter)}
+                  >
+                    <option value="all">전체</option>
+                    <option value="yes">주차 가능</option>
+                    <option value="no">주차 불가능</option>
+                  </select>
+                </label>
+              </div>
+              <button
+                type="button"
+                className="calendarFilterReset"
+                onClick={resetFilters}
+                disabled={!filtersActive}
+              >
+                초기화
+              </button>
+            </div>
+          ) : null}
+
           {error ? <div className="error">{error}</div> : null}
 
           {loadingList ? (
             <div className="muted">불러오는 중…</div>
           ) : festivals.length === 0 ? (
             <div className="muted">선택한 날짜에 진행 중인 축제가 없어요.</div>
+          ) : filteredFestivals.length === 0 ? (
+            <div className="muted">선택한 조건에 맞는 축제가 없어요.</div>
           ) : (
             <div className="festivalList">
-              {(expanded ? festivals : festivals.slice(0, 2)).map((f) => (
+              {(expanded ? filteredFestivals : filteredFestivals.slice(0, 2)).map((f) => (
                 <article
                   key={f.contentId}
                   className="festivalItem"
@@ -263,6 +357,13 @@ export function FestivalCalendarPage() {
                         {f.startDate}~{f.endDate}
                       </div>
                       {f.address?.addr1 ? <div className="festivalLoc">{f.address.addr1}</div> : null}
+                      <div className="festivalFilterMeta">
+                        <span>{festivalRegionLabel(f)}</span>
+                        <span aria-hidden="true"> · </span>
+                        <span>{festivalTimeSlotLabel(f)}</span>
+                        <span aria-hidden="true"> · </span>
+                        <span>{festivalParkingPossible(f) ? '주차 가능' : '주차 불가능'}</span>
+                      </div>
                     </div>
                   </div>
                 </article>
@@ -270,10 +371,10 @@ export function FestivalCalendarPage() {
             </div>
           )}
 
-          {!loadingList && !expanded && festivals.length > 2 ? (
+          {!loadingList && !expanded && filteredFestivals.length > 2 ? (
             <div className="listMoreWrap">
               <button type="button" className="listMoreBtn" onClick={() => setExpanded(true)}>
-                더보기 ({festivals.length - 2}개)
+                더보기 ({filteredFestivals.length - 2}개)
               </button>
             </div>
           ) : null}
