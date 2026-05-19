@@ -180,6 +180,36 @@ export type LoginResponse = { ok: true; token: string; user: AuthUser }
 export type SignupResponse = { ok: true; user: AuthUser }
 export type CreateSessionResponse = { ok: true; sessionId: string }
 
+export type CollabSessionState = {
+  map: { center: { lat: number; lng: number } | null; zoom: number | null }
+  cart: { placeIds: string[] }
+  selectedPlaceId: string | null
+}
+
+export type FetchSessionResponse = {
+  ok: true
+  session: {
+    id: string
+    hostUserId: string
+    state: CollabSessionState
+  }
+}
+
+export async function fetchSession(sessionId: string, signal?: AbortSignal): Promise<FetchSessionResponse> {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('pintravel_token') : null
+  if (!token) throw new Error('UNAUTHORIZED')
+
+  const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+    headers: { authorization: `Bearer ${token}` },
+    signal,
+    credentials: 'include',
+  })
+  if (res.status === 401) throw new Error('UNAUTHORIZED')
+  if (res.status === 404) throw new Error('NOT_FOUND')
+  if (!res.ok) throw new Error(`HTTP_${res.status}`)
+  return (await res.json()) as FetchSessionResponse
+}
+
 export function signup(params: { username: string; password: string; email: string }, signal?: AbortSignal) {
   return postJson<SignupResponse>('/api/auth/signup', params, signal)
 }

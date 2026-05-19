@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 
 import { registerRoutes } from "./routes/index.js";
 import { attachSocketServer } from "./realtime/socket.js";
+import { corsOriginCallback } from "./security/corsOrigins.js";
 import { closeMongo, connectMongo } from "./storage/mongo.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -33,7 +34,7 @@ async function main() {
   app.use(express.json({ limit: "1mb" }));
   app.use(
     cors({
-      origin: process.env.WEB_ORIGIN ?? "http://localhost:5173",
+      origin: corsOriginCallback,
       credentials: true,
     })
   );
@@ -60,8 +61,9 @@ async function main() {
   process.on("SIGTERM", () => shutdown("SIGTERM"));
 
   const port = Number(process.env.PORT ?? 4000);
-  server.listen(port, () => {
-    console.log(`[api] listening on http://localhost:${port}`);
+  const host = process.env.HOST ?? "0.0.0.0";
+  server.listen(port, host, () => {
+    console.log(`[api] listening on http://${host}:${port} (LAN: http://<이-PC-IP>:${port})`);
   });
 }
 

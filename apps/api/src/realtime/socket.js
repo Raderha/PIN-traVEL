@@ -4,45 +4,56 @@
  */
 import { Server } from "socket.io";
 import { sessions } from "../storage/memory.js";
+import { corsOriginCallback } from "../security/corsOrigins.js";
+
+function isSessionHostSocket(socket, sessionId) {
+  if (socket.data.isSessionHost) return true;
+  const s = sessions.get(sessionId);
+  const uid = socket.data.userId;
+  return Boolean(s && uid && s.hostUserId === uid);
+}
 
 export function attachSocketServer(httpServer) {
   const io = new Server(httpServer, {
     cors: {
-      origin: process.env.WEB_ORIGIN ?? "http://localhost:5173",
+      origin: corsOriginCallback,
       credentials: true,
     },
   });
 
   io.on("connection", (socket) => {
-    // 세션 참여
-    socket.on("session:join", ({ sessionId, username }) => {
+    socket.on("session:join", ({ sessionId, username, userId }) => {
       if (!sessionId) return;
       socket.join(sessionId);
       socket.data.sessionId = sessionId;
       socket.data.username = username ?? "guest";
+      socket.data.userId = userId ?? null;
 
       const s = sessions.get(sessionId);
+      socket.data.isSessionHost = Boolean(s && userId && s.hostUserId === userId);
+
       socket.emit("session:state", { sessionId, state: s?.state ?? null });
       socket.to(sessionId).emit("session:member-joined", { username: socket.data.username });
     });
 
-    // 마우스 공유 (UC7-REQ-2)
     socket.on("session:cursor", ({ x, y }) => {
       const sessionId = socket.data.sessionId;
       if (!sessionId) return;
+      if (typeof x !== "number" || typeof y !== "number") return;
       socket.to(sessionId).emit("session:cursor", { username: socket.data.username, x, y });
     });
 
-    // 호스트 시점 동기화 (UC7-REQ-3)
     socket.on("session:map", ({ center, zoom }) => {
       const sessionId = socket.data.sessionId;
-      if (!sessionId) return;
+      if (!sessionId || !isSessionHostSocket(socket, sessionId)) return;
+      if (!center || typeof center.lat !== "number" || typeof center.lng !== "number") return;
+      if (typeof zoom !== "number") return;
+
       const s = sessions.get(sessionId);
       if (s) s.state.map = { center, zoom };
       socket.to(sessionId).emit("session:map", { center, zoom });
     });
 
-    // 장바구니 동기화 (UC7-REQ-4)
     socket.on("session:cart", ({ placeIds }) => {
       const sessionId = socket.data.sessionId;
       if (!sessionId) return;
@@ -51,7 +62,6 @@ export function attachSocketServer(httpServer) {
       socket.to(sessionId).emit("session:cart", { placeIds });
     });
 
-    // 핀 선택 동기화 
     socket.on("session:selectedPlace", ({ placeId }) => {
       const sessionId = socket.data.sessionId;
       if (!sessionId) return;

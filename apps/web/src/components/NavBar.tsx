@@ -1,8 +1,10 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 import logoUrl from '../assets/logo.png'
 import { createSession } from '../lib/api'
 import { clearPintravelClientStorage } from '../lib/clearPintravelStorage'
+import { copyTextToClipboard } from '../lib/copyToClipboard'
+import { resolveShareableOrigin } from '../lib/shareableOrigin'
 
 export function NavBar() {
   const nav = useNavigate()
@@ -62,6 +64,9 @@ export function MapNavBar() {
   const [sessionUrl, setSessionUrl] = useState<string | null>(null)
   const [creatingSession, setCreatingSession] = useState(false)
   const [sessionError, setSessionError] = useState<string | null>(null)
+  const [sessionCopyDone, setSessionCopyDone] = useState(false)
+  const [sessionCopyManual, setSessionCopyManual] = useState(false)
+  const sessionUrlInputRef = useRef<HTMLInputElement>(null)
 
   function onLogout() {
     clearPintravelClientStorage()
@@ -82,7 +87,13 @@ export function MapNavBar() {
     setSessionError(null)
     try {
       const r = await createSession()
-      setSessionUrl(`${window.location.origin}/map?session=${encodeURIComponent(r.sessionId)}`)
+      const origin = await resolveShareableOrigin()
+      const url = `${origin}/map?session=${encodeURIComponent(r.sessionId)}`
+      setSessionCopyDone(false)
+      setSessionCopyManual(false)
+      setSessionUrl(url)
+      /** 호스트도 같은 세션 room에 들어가야 지도·커서를 보낼 수 있음 */
+      nav(`/map?session=${encodeURIComponent(r.sessionId)}`)
     } catch {
       setSessionError('세션 생성에 실패했어요.')
     } finally {
@@ -92,7 +103,19 @@ export function MapNavBar() {
 
   async function onCopySessionUrl() {
     if (!sessionUrl) return
-    await navigator.clipboard?.writeText(sessionUrl)
+    const ok = await copyTextToClipboard(sessionUrl)
+    if (ok) {
+      setSessionCopyManual(false)
+      setSessionCopyDone(true)
+      window.setTimeout(() => setSessionCopyDone(false), 2200)
+      return
+    }
+    setSessionCopyManual(true)
+    const input = sessionUrlInputRef.current
+    if (input) {
+      input.focus()
+      input.select()
+    }
   }
 
   return (
@@ -138,10 +161,29 @@ export function MapNavBar() {
           <div className="sessionModal" role="dialog" aria-modal="true" aria-label="세션 생성 성공">
             <div className="sessionModalCheck" aria-hidden="true">✓</div>
             <h2>세션 생성 성공</h2>
-            <div className="sessionUrlBox">{sessionUrl}</div>
+            {sessionUrl.includes('localhost') || sessionUrl.includes('127.0.0.1') ? (
+              <p className="sessionModalHint">
+                다른 기기에서는 이 주소로 접속할 수 없어요. 브라우저 주소창에 PC의 Wi‑Fi IP(예: 192.168.0.10:5173)로
+                연 뒤 세션을 다시 만들어 주세요.
+              </p>
+            ) : null}
+            <input
+              ref={sessionUrlInputRef}
+              className="sessionUrlInput"
+              type="text"
+              readOnly
+              value={sessionUrl}
+              aria-label="세션 초대 URL"
+              onFocus={(e) => e.currentTarget.select()}
+              onClick={(e) => e.currentTarget.select()}
+            />
+            {sessionCopyDone ? <p className="sessionCopyOk">클립보드에 복사했어요.</p> : null}
+            {sessionCopyManual ? (
+              <p className="sessionModalHint">자동 복사가 안 되면 위 주소를 길게 눌러 전체 선택 후 복사해 주세요.</p>
+            ) : null}
             <div className="sessionModalActions">
-              <button type="button" onClick={onCopySessionUrl}>
-                복사하기
+              <button type="button" onClick={() => void onCopySessionUrl()}>
+                {sessionCopyDone ? '복사됨' : '복사하기'}
               </button>
               <button type="button" onClick={() => setSessionUrl(null)}>
                 확인

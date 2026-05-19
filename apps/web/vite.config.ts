@@ -12,8 +12,11 @@ export default defineConfig(({ mode }) => {
       'import.meta.env.VITE_X_NCP_APIGW_API_KEY_ID': JSON.stringify(naverMapKeyId),
     },
     server: {
+      /** 같은 Wi‑Fi의 다른 기기에서 dev 서버 접속 허용 */
+      host: true,
       proxy: {
-        '/api': 'http://localhost:4000',
+        '/api': 'http://127.0.0.1:4000',
+        '/socket.io': { target: 'http://127.0.0.1:4000', ws: true },
       },
     },
   }

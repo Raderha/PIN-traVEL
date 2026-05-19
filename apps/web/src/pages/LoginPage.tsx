@@ -30,6 +30,16 @@ export function LoginPage() {
     return qs.get('next') ?? '/'
   }, [loc.search])
 
+  const joiningSession = useMemo(() => {
+    try {
+      const path = nextPath.startsWith('http') ? new URL(nextPath).search : nextPath.split('?')[1] ?? ''
+      const qs = new URLSearchParams(path.startsWith('?') ? path.slice(1) : path)
+      return qs.has('session') || nextPath.includes('session=')
+    } catch {
+      return nextPath.includes('session=')
+    }
+  }, [nextPath])
+
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -64,6 +74,10 @@ export function LoginPage() {
         </div>
 
         <p className="loginGreeting">어디로 떠나볼까요?</p>
+
+        {joiningSession ? (
+          <p className="loginSessionHint">협업 세션에 참가하려면 로그인(또는 회원가입)이 필요해요.</p>
+        ) : null}
 
         {error ? <div className="loginError">{error}</div> : null}
 

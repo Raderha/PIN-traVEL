@@ -943,12 +943,109 @@ button.homeLandingCta {
   color-scheme: light;
 }
 
+.mapPageMapStack {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+}
+
 .mapCanvas {
   position: absolute;
   inset: 0;
   z-index: 1;
   width: 100%;
   height: 100%;
+}
+
+.sessionCursorLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.sessionRemoteCursor {
+  position: absolute;
+  transform: translate(-2px, -2px);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.sessionRemoteCursorDot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  border-radius: 50%;
+  background: var(--cursor-color, #2563eb);
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+}
+
+.sessionRemoteCursorPointer {
+  display: block;
+  position: relative;
+  left: 4px;
+  top: 2px;
+  width: 0;
+  height: 0;
+  border-left: 8px solid var(--cursor-color, #2563eb);
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35));
+}
+
+.sessionRemoteCursorLabel {
+  display: inline-block;
+  margin-left: 6px;
+  margin-top: -2px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--cursor-color, #2563eb);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  vertical-align: top;
+}
+
+.mapCollabBadge {
+  position: absolute;
+  left: 50%;
+  top: 64px;
+  transform: translateX(-50%);
+  z-index: 7;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(17, 24, 39, 0.72);
+  color: #e5e7eb;
+  font-size: 12px;
+  font-weight: 800;
+  pointer-events: none;
+}
+
+.mapCollabBadge--on {
+  background: rgba(4, 120, 87, 0.92);
+  color: #ecfdf5;
+}
+
+.mapCollabError {
+  position: absolute;
+  left: 50%;
+  top: 100px;
+  transform: translateX(-50%);
+  z-index: 7;
+  max-width: min(420px, 92vw);
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .mapFilterToggle {
@@ -1681,6 +1778,90 @@ button.homeLandingCta {
   font-size: 14px;
   font-weight: 800;
   box-shadow: 0 10px 26px rgba(15, 23, 42, 0.16);
+}
+
+.mapLanAuthBanner {
+  position: absolute;
+  left: 50%;
+  top: 72px;
+  transform: translateX(-50%);
+  z-index: 8;
+  width: min(520px, calc(100vw - 24px));
+  max-height: min(42vh, 320px);
+  overflow: auto;
+  border-radius: 12px;
+  padding: 14px 16px;
+  background: rgba(255, 251, 235, 0.98);
+  color: #78350f;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18);
+  border: 1px solid #fcd34d;
+}
+
+.mapLanAuthBannerTitle {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 900;
+  color: #92400e;
+}
+
+.mapLanAuthBannerBody {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.mapLanAuthBannerUrls {
+  margin: 0 0 12px;
+  padding-left: 18px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.mapLanAuthBannerUrls code {
+  word-break: break-all;
+}
+
+.mapLanAuthBannerMeta {
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.loginSessionHint {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.mapLanAuthBannerActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.mapLanAuthBannerActions button {
+  border: none;
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: #111827;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.mapLanAuthBannerActions button:last-child {
+  background: transparent;
+  color: #78350f;
 }
 
 .mapItineraryLoading {
@@ -2605,7 +2786,7 @@ button.homeLandingCta {
 }
 
 .sessionModal {
-  width: min(360px, calc(100vw - 40px));
+  width: min(520px, calc(100vw - 32px));
   border-radius: 10px;
   padding: 26px 18px 18px;
   background: #ffffff;
@@ -2629,16 +2810,42 @@ button.homeLandingCta {
   font-weight: 900;
 }
 
-.sessionUrlBox {
-  overflow: hidden;
+.sessionModalHint {
+  margin: 0 0 12px;
+  color: #b45309;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.45;
+  text-align: left;
+}
+
+.sessionUrlInput {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  border: none;
   border-radius: 8px;
   padding: 12px 14px;
   background: #eef0f4;
   color: #374151;
-  font-size: 14px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.4;
+  word-break: break-all;
+  text-align: left;
+}
+
+.sessionUrlInput:focus {
+  outline: 2px solid #111827;
+  outline-offset: 1px;
+}
+
+.sessionCopyOk {
+  margin: 10px 0 0;
+  color: #047857;
+  font-size: 13px;
   font-weight: 800;
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
 
 .sessionModalActions {

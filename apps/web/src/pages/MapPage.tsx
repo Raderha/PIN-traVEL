@@ -29,7 +29,11 @@ import {
 } from '../lib/api'
 import { concatPathSegments, itineraryDayColor, legIndicesForStopDay } from '../lib/itineraryPaths'
 import { computeStopDayIndicesFromCart, flattenCartPinsWithLocation } from '../lib/itineraryStopDays'
+import { copyTextToClipboard } from '../lib/copyToClipboard'
+import { buildNcpMapLanAuthHint, ncpWebUrlPatternsForOrigin } from '../lib/networkHost'
 import { buildRouteCompactForSchedule, buildVisitDaysFromCart, SCHEDULE_DEFAULT_REGION } from '../lib/schedulePersist'
+import { SessionCursorOverlay } from '../components/SessionCursorOverlay'
+import { useCollabSession } from '../hooks/useCollabSession'
 
 type NaverLatLng = unknown
 type NaverPoint = unknown
@@ -41,8 +45,11 @@ type NaverEventListener = unknown
 type NaverMapInstance = {
   setCenter(position: NaverLatLng): void
   setZoom?(zoom: number): void
+  getCenter?: () => NaverLatLng & { lat?: () => number; lng?: () => number; y?: number; x?: number }
   getZoom(): number
   getBounds(): NaverLatLngBounds
+  setOptions?: (opts: Record<string, unknown>) => void
+  morph?: (center: NaverLatLng, zoom: number) => void
 }
 type NaverMarkerInstance = {
   setMap(map: NaverMapInstance | null): void
@@ -392,10 +399,17 @@ function spreadPinsForDisplay(pins: SummaryPin[]) {
   return displayed
 }
 
-function loadNaverMapScript() {
+function installNaverMapAuthFailureHandler(onFail: () => void) {
+  const w = window as Window & { navermap_authFailure?: () => void }
+  w.navermap_authFailure = () => onFail()
+}
+
+function loadNaverMapScript(onAuthFailure?: () => void) {
   if (getNaverMaps()) return Promise.resolve()
   if (!NAVER_MAP_KEY_ID) return Promise.reject(new Error('MISSING_NAVER_MAP_KEY'))
   if (naverMapScriptPromise) return naverMapScriptPromise
+
+  if (onAuthFailure) installNaverMapAuthFailureHandler(onAuthFailure)
 
   naverMapScriptPromise = new Promise((resolve, reject) => {
     const existingScript = document.getElementById(NAVER_MAP_SCRIPT_ID) as HTMLScriptElement | null
@@ -520,6 +534,8 @@ export function MapPage() {
   const [aiRecommendationLoading, setAiRecommendationLoading] = useState(false)
   const [aiRecommendationError, setAiRecommendationError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [mapLanHintDismissed, setMapLanHintDismissed] = useState(false)
+  const [mapNaverAuthFailed, setMapNaverAuthFailed] = useState(false)
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false)
   /** 모달에서 확정한 출발지·시작일 */
   const [confirmedItineraryBasics, setConfirmedItineraryBasics] = useState<ItineraryScheduleConfirmPayload | null>(null)
@@ -550,6 +566,16 @@ export function MapPage() {
   const filterRangeLabel = useMemo(() => rangeLabel(filterRange.from, filterRange.to), [filterRange])
   const cartPins = useMemo(() => cartDays.flat(), [cartDays])
   const hasCartContent = cartPins.length > 0
+
+  const mapLanAuthHint = useMemo(() => {
+    if (typeof window === 'undefined') return null
+    return buildNcpMapLanAuthHint(window.location.origin, window.location.hostname)
+  }, [])
+
+  const ncpWebUrlPatterns = useMemo(() => {
+    if (typeof window === 'undefined') return [] as string[]
+    return ncpWebUrlPatternsForOrigin(window.location.origin)
+  }, [])
 
   useEffect(() => {
     if (!tripHotelId) return
@@ -582,9 +608,22 @@ export function MapPage() {
     return summaryPins.filter((pin) => selectedCategories.includes(categoryForPin(pin)))
   }, [selectedCategories, summaryPins])
 
-  const token = useMemo(() => {
+  function readAuthToken() {
     return typeof window !== 'undefined' ? localStorage.getItem('pintravel_token') : null
-  }, [])
+  }
+
+  const collabSessionId = useMemo(() => {
+    return new URLSearchParams(location.search).get('session')
+  }, [location.search])
+
+  const collab = useCollabSession({
+    sessionId: collabSessionId,
+    enabled: Boolean(collabSessionId && readAuthToken()),
+    mapReady,
+    mapRef,
+    mapElementRef,
+    getNaverMaps,
+  })
 
   function requireLogin() {
     const next = `${location.pathname}${location.search}`
@@ -593,9 +632,11 @@ export function MapPage() {
 
   useEffect(() => {
     const sp = new URLSearchParams(location.search)
-    const session = sp.get('session')
-    if (session && !token) requireLogin()
-  }, [location.search, token])
+    const sessionId = sp.get('session')
+    if (!sessionId) return
+    const authToken = localStorage.getItem('pintravel_token')
+    if (!authToken) requireLogin()
+  }, [location.pathname, location.search])
 
   useEffect(() => {
     localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(cartDays))
@@ -710,7 +751,7 @@ export function MapPage() {
   function addSelectedPinToCart() {
     const pin = selectedPin
     if (!pin) return
-    if (!token) {
+    if (!readAuthToken()) {
       requireLogin()
       return
     }
@@ -873,7 +914,7 @@ export function MapPage() {
   }
 
   function addRecommendationToCart(item: AiRecommendationItem, kind: 'food' | 'hotel') {
-    if (!token) {
+    if (!readAuthToken()) {
       requireLogin()
       return
     }
@@ -1043,7 +1084,7 @@ export function MapPage() {
   useEffect(() => {
     let cancelled = false
 
-    loadNaverMapScript()
+    loadNaverMapScript(() => setMapNaverAuthFailed(true))
       .then(() => {
         const maps = getNaverMaps()
         if (cancelled || !mapElementRef.current || !maps) return
@@ -1068,6 +1109,22 @@ export function MapPage() {
       markersRef.current = []
     }
   }, [])
+
+  useEffect(() => {
+    if (!mapReady || !mapElementRef.current) return
+    const el = mapElementRef.current
+    const detect = () => {
+      const t = el.textContent ?? ''
+      if (t.includes('인증이 실패') || t.includes('Open API 인증')) setMapNaverAuthFailed(true)
+    }
+    detect()
+    const id = window.setInterval(detect, 600)
+    const stop = window.setTimeout(() => window.clearInterval(id), 8000)
+    return () => {
+      window.clearInterval(id)
+      window.clearTimeout(stop)
+    }
+  }, [mapReady])
 
   useEffect(() => {
     const mapsMaybe = getNaverMaps()
@@ -1358,9 +1415,62 @@ export function MapPage() {
     }
   }, [itineraryRoute, mapReady, itineraryMapDay, stopDayIndices])
 
+  const showMapLanBanner = !mapLanHintDismissed && (mapLanAuthHint != null || mapNaverAuthFailed)
+
   return (
     <section className="mapPage">
-      <div ref={mapElementRef} className="mapCanvas" />
+      <div className="mapPageMapStack">
+        <div ref={mapElementRef} className="mapCanvas" />
+        <SessionCursorOverlay cursors={collab.remoteCursors} />
+      </div>
+
+      {collabSessionId ? (
+        <div
+          className={`mapCollabBadge ${collab.connected ? 'mapCollabBadge--on' : ''}`}
+          role="status"
+        >
+          {collab.connected
+            ? collab.isHost
+              ? '협업 세션 · 호스트(지도·커서 공유 중)'
+              : '협업 세션 · 게스트(호스트 화면 동기화 · 직접 이동 불가)'
+            : '협업 세션 연결 중…'}
+        </div>
+      ) : null}
+
+      {collab.sessionError ? (
+        <div className="mapCollabError" role="alert">
+          {collab.sessionError}
+        </div>
+      ) : null}
+
+      {showMapLanBanner ? (
+        <aside className="mapLanAuthBanner" role="alert">
+          <p className="mapLanAuthBannerTitle">네이버 지도 인증 (LAN 접속)</p>
+          <p className="mapLanAuthBannerBody">
+            NCP <strong>Maps Application</strong> → 서비스 환경 → Web 서비스 URL에 아래 주소를{' '}
+            <strong>경로·별표(`/*`) 없이</strong> 넣고 저장하세요. 브라우저 주소창과 완전히 같아야 합니다.
+          </p>
+          <ul className="mapLanAuthBannerUrls">
+            {ncpWebUrlPatterns.map((url) => (
+              <li key={url}>
+                <code>{url}</code>
+              </li>
+            ))}
+          </ul>
+          <p className="mapLanAuthBannerMeta">
+            Client ID 앞 4자리: <code>{NAVER_MAP_KEY_ID ? String(NAVER_MAP_KEY_ID).slice(0, 4) : '—'}…</code>
+            (콘솔 Application의 Client ID와 같아야 함)
+          </p>
+          <div className="mapLanAuthBannerActions">
+            <button type="button" onClick={() => void copyTextToClipboard(ncpWebUrlPatterns.join('\n'))}>
+              URL 복사
+            </button>
+            <button type="button" onClick={() => setMapLanHintDismissed(true)}>
+              닫기
+            </button>
+          </div>
+        </aside>
+      ) : null}
 
       <div className="mapFilterChips" aria-label="카테고리 및 장소 핀">
         <div className="mapFilterChipsInner">
