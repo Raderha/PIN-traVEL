@@ -180,9 +180,30 @@ export type LoginResponse = { ok: true; token: string; user: AuthUser }
 export type SignupResponse = { ok: true; user: AuthUser }
 export type CreateSessionResponse = { ok: true; sessionId: string }
 
+export type CollabSessionCartState = {
+  cartDays: SummaryPin[][]
+  tripHotelId: string | null
+}
+
+export type CollabSessionItineraryState = {
+  basics: { departure: string; tripStartDate: string } | null
+  route: ItineraryRouteResult | null
+  narrative: {
+    text: string | null
+    loading: boolean
+    error: string | null
+    geminiOff: boolean
+  }
+  itineraryMapDay: number | 'all'
+  itinerarySummaryPinsOn: boolean
+  itineraryLoading: boolean
+  itineraryError: string | null
+}
+
 export type CollabSessionState = {
   map: { center: { lat: number; lng: number } | null; zoom: number | null }
-  cart: { placeIds: string[] }
+  cart: CollabSessionCartState
+  itinerary: CollabSessionItineraryState | null
   selectedPlaceId: string | null
 }
 

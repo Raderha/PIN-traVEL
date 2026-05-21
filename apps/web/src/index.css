@@ -1256,6 +1256,25 @@ button.homeLandingCta {
   font-weight: 900;
 }
 
+.mapDateResetBtn {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  padding: 6px 0;
+  border: 1px solid #d1d5db;
+  border-radius: 5px;
+  background: #fff;
+  color: #374151;
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.mapDateResetBtn:hover {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+}
+
 .mapDetailPanel {
   position: absolute;
   top: 0;
@@ -2256,6 +2275,19 @@ button.homeLandingCta {
   color: #ffffff;
   font-size: 12px;
   font-weight: 900;
+  flex-shrink: 0;
+}
+
+.mapItineraryStopNum--hotel {
+  background: transparent;
+  border-radius: 0;
+}
+
+.mapItineraryStopNum--hotel img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  display: block;
 }
 
 .mapItineraryStopDl {
@@ -2399,6 +2431,19 @@ button.homeLandingCta {
 .itineraryMapNumMarker--dep {
   background: #059669;
   font-size: 12px;
+}
+
+.itineraryMapNumMarker--hotel {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.itineraryMapNumMarker--hotel img {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  display: block;
 }
 
 /* 일정 생성 — 출발지·시작일 모달 */

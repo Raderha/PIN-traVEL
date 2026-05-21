@@ -29,8 +29,14 @@ import {
 } from '../lib/api'
 import { concatPathSegments, itineraryDayColor, legIndicesForStopDay } from '../lib/itineraryPaths'
 import { computeStopDayIndicesFromCart, flattenCartPinsWithLocation } from '../lib/itineraryStopDays'
+import { isHotelPin, itineraryHotelMarkerHtml, pinForRouteStopOrder } from '../lib/pinHotel'
 import { copyTextToClipboard } from '../lib/copyToClipboard'
 import { buildNcpMapLanAuthHint, ncpWebUrlPatternsForOrigin } from '../lib/networkHost'
+import {
+  emptyCollabItinerary,
+  emptyCollabItineraryNarrative,
+  type CollabItineraryPayload,
+} from '../lib/collabItinerary'
 import { buildRouteCompactForSchedule, buildVisitDaysFromCart, SCHEDULE_DEFAULT_REGION } from '../lib/schedulePersist'
 import { SessionCursorOverlay } from '../components/SessionCursorOverlay'
 import { useCollabSession } from '../hooks/useCollabSession'
@@ -76,9 +82,82 @@ const CLUSTER_UNLOCK_ZOOM = 16
 const NAVER_MAP_SCRIPT_ID = 'naver-map-script'
 const NAVER_MAP_KEY_ID = import.meta.env.VITE_X_NCP_APIGW_API_KEY_ID
 const FILTER_YEAR = 2026
-const FILTER_MONTH = 4
-const FILTER_DAYS = 30
 const CART_STORAGE_KEY = 'pintravel_map_cart_days'
+const MAP_FILTER_MONTH_OPTIONS = Array.from({ length: 12 }, (_, i) => i + 1)
+const MAP_CALENDAR_DOW = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'] as const
+
+type MapCalendarCell = {
+  date: string
+  day: number
+  inMonth: boolean
+}
+
+function pad2(n: number) {
+  return String(n).padStart(2, '0')
+}
+
+function toIsoDateParts(year: number, month: number, day: number) {
+  return `${year}-${pad2(month)}-${pad2(day)}`
+}
+
+function lastDayOfMonth(year: number, month: number) {
+  return new Date(year, month, 0).getDate()
+}
+
+function defaultFilterViewMonth() {
+  const now = new Date()
+  if (now.getFullYear() === FILTER_YEAR) return now.getMonth() + 1
+  return 1
+}
+
+function createDefaultFestivalFilterState() {
+  const viewMonth = defaultFilterViewMonth()
+  return {
+    viewMonth,
+    range: {
+      from: toIsoDateParts(FILTER_YEAR, viewMonth, 1),
+      to: toIsoDateParts(FILTER_YEAR, viewMonth, lastDayOfMonth(FILTER_YEAR, viewMonth)),
+    },
+  }
+}
+
+function buildMapCalendarCells(year: number, month: number): MapCalendarCell[] {
+  const firstDow = new Date(year, month - 1, 1).getDay()
+  const daysInMonth = lastDayOfMonth(year, month)
+  const prevMonth = month === 1 ? 12 : month - 1
+  const prevYear = month === 1 ? year - 1 : year
+  const prevLastDay = lastDayOfMonth(prevYear, prevMonth)
+  const nextMonth = month === 12 ? 1 : month + 1
+  const nextYear = month === 12 ? year + 1 : year
+
+  const cells: MapCalendarCell[] = []
+
+  for (let i = firstDow - 1; i >= 0; i--) {
+    const day = prevLastDay - i
+    cells.push({ date: toIsoDateParts(prevYear, prevMonth, day), day, inMonth: false })
+  }
+  for (let day = 1; day <= daysInMonth; day++) {
+    cells.push({ date: toIsoDateParts(year, month, day), day, inMonth: true })
+  }
+  let nextDay = 1
+  while (cells.length < 42) {
+    cells.push({ date: toIsoDateParts(nextYear, nextMonth, nextDay), day: nextDay, inMonth: false })
+    nextDay += 1
+  }
+  return cells
+}
+
+function formatFilterRangeLabel(from: string, to: string) {
+  const parse = (iso: string) => {
+    const [, m, d] = iso.split('-').map(Number)
+    return { m, d }
+  }
+  const a = parse(from)
+  const b = parse(to)
+  if (from === to) return `${a.m}월 ${a.d}일`
+  if (a.m === b.m) return `${a.m}월 ${a.d}일 ~ ${b.d}일`
+  return `${a.m}월 ${a.d}일 ~ ${b.m}월 ${b.d}일`
+}
 
 let naverMapScriptPromise: Promise<void> | null = null
 
@@ -108,18 +187,6 @@ function formatPinDate(date: string | null | undefined) {
   if (!date) return null
   const [year, month, day] = date.split('-')
   return `${year}.${month}.${day}`
-}
-
-function toIsoDate(day: number) {
-  return `${FILTER_YEAR}-${String(FILTER_MONTH).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-}
-
-function dayFromIsoDate(date: string) {
-  return Number(date.split('-')[2])
-}
-
-function rangeLabel(from: string, to: string) {
-  return `${FILTER_MONTH}월 ${dayFromIsoDate(from)}일 ~ ${FILTER_MONTH}월 ${dayFromIsoDate(to)}일`
 }
 
 function summaryDateRange(pin: SummaryPin) {
@@ -202,17 +269,6 @@ function recommendationToCartPin(item: AiRecommendationItem, kind: 'food' | 'hot
     },
     location: item.location,
   }
-}
-
-function isHotelPin(pin: SummaryPin): boolean {
-  if (pin.id.startsWith('recommendation:hotel:')) return true
-  if (pin.kind === 'festival') return false
-  const ct = String(pin.contentTypeId ?? '').trim()
-  if (ct === '32') return true
-  const cat1 = pin.detail?.category?.cat1 ?? ''
-  const cat2 = pin.detail?.category?.cat2 ?? ''
-  const cat3 = pin.detail?.category?.cat3 ?? ''
-  return cat1 === 'B02' || cat2.startsWith('B02') || cat3.includes('B02')
 }
 
 function appendHotelLastEveryDay(
@@ -507,6 +563,17 @@ function createItineraryOrderMarkerHtml(order: number, dayIndex?: number) {
   return `<div class="itineraryMapNumMarker" style="background:${hue}" aria-hidden="true">${order}</div>`
 }
 
+function createItineraryStopMarkerHtml(
+  order: number,
+  dayIndex: number | undefined,
+  cartDays: SummaryPin[][],
+  tripHotelId: string | null,
+) {
+  const pin = pinForRouteStopOrder(order, cartDays, tripHotelId)
+  if (pin && isHotelPin(pin)) return itineraryHotelMarkerHtml()
+  return createItineraryOrderMarkerHtml(order, dayIndex)
+}
+
 export function MapPage() {
   const location = useLocation()
   const nav = useNavigate()
@@ -526,7 +593,8 @@ export function MapPage() {
   const [selectedCategories, setSelectedCategories] = useState<MapCategory[]>(['전체'])
   const [calendarOpen, setCalendarOpen] = useState(false)
   const [festivalFilterEnabled, setFestivalFilterEnabled] = useState(false)
-  const [filterRange, setFilterRange] = useState({ from: toIsoDate(1), to: toIsoDate(FILTER_DAYS) })
+  const [filterViewMonth, setFilterViewMonth] = useState(() => createDefaultFestivalFilterState().viewMonth)
+  const [filterRange, setFilterRange] = useState(() => createDefaultFestivalFilterState().range)
   const [mapReady, setMapReady] = useState(false)
   const [zoomLevel, setZoomLevel] = useState<number | null>(null)
   const [aiRecommendations, setAiRecommendations] = useState<AiRecommendationsResponse | null>(null)
@@ -546,6 +614,7 @@ export function MapPage() {
   const [scheduleSaveFeedback, setScheduleSaveFeedback] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
   /** 일정 경로가 있을 때 정보 요약 핀을 지도에 다시 표시 */
   const [itinerarySummaryPinsOn, setItinerarySummaryPinsOn] = useState(false)
+  const [itineraryNarrative, setItineraryNarrative] = useState(emptyCollabItineraryNarrative)
 
   const stopDayIndices = useMemo(() => {
     if (!itineraryRoute?.stops?.length) return [] as number[]
@@ -563,7 +632,14 @@ export function MapPage() {
 
   const selectedAiRecommendations =
     selectedPin && aiRecommendationPinId === selectedPin.id ? aiRecommendations : null
-  const filterRangeLabel = useMemo(() => rangeLabel(filterRange.from, filterRange.to), [filterRange])
+  const filterRangeLabel = useMemo(
+    () => formatFilterRangeLabel(filterRange.from, filterRange.to),
+    [filterRange],
+  )
+  const filterCalendarCells = useMemo(
+    () => buildMapCalendarCells(FILTER_YEAR, filterViewMonth),
+    [filterViewMonth],
+  )
   const cartPins = useMemo(() => cartDays.flat(), [cartDays])
   const hasCartContent = cartPins.length > 0
 
@@ -616,6 +692,41 @@ export function MapPage() {
     return new URLSearchParams(location.search).get('session')
   }, [location.search])
 
+  const itineraryPayload = useMemo(
+    (): CollabItineraryPayload => ({
+      basics: confirmedItineraryBasics,
+      route: itineraryRoute,
+      narrative: itineraryNarrative,
+      itineraryMapDay,
+      itinerarySummaryPinsOn,
+      itineraryLoading: itineraryRouteLoading,
+      itineraryError: itineraryRouteError,
+    }),
+    [
+      confirmedItineraryBasics,
+      itineraryRoute,
+      itineraryNarrative,
+      itineraryMapDay,
+      itinerarySummaryPinsOn,
+      itineraryRouteLoading,
+      itineraryRouteError,
+    ],
+  )
+
+  function applyRemoteItinerary(payload: CollabItineraryPayload) {
+    setConfirmedItineraryBasics(payload.basics)
+    setItineraryRoute(payload.route)
+    setItineraryNarrative(payload.narrative)
+    setItineraryMapDay(payload.itineraryMapDay)
+    setItinerarySummaryPinsOn(payload.itinerarySummaryPinsOn)
+    setItineraryRouteLoading(payload.itineraryLoading)
+    setItineraryRouteError(payload.itineraryError)
+    if (!payload.route) {
+      setScheduleSideTab('itinerary')
+      setScheduleSaveFeedback(null)
+    }
+  }
+
   const collab = useCollabSession({
     sessionId: collabSessionId,
     enabled: Boolean(collabSessionId && readAuthToken()),
@@ -623,7 +734,15 @@ export function MapPage() {
     mapRef,
     mapElementRef,
     getNaverMaps,
+    cartDays,
+    tripHotelId,
+    setCartDays,
+    setTripHotelId,
+    itineraryPayload,
+    onApplyRemoteItinerary: applyRemoteItinerary,
   })
+
+  const collabManageItinerary = !collabSessionId || collab.isHost
 
   function requireLogin() {
     const next = `${location.pathname}${location.search}`
@@ -639,8 +758,9 @@ export function MapPage() {
   }, [location.pathname, location.search])
 
   useEffect(() => {
+    if (collabSessionId) return
     localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(cartDays))
-  }, [cartDays])
+  }, [cartDays, collabSessionId])
 
   useEffect(() => {
     if (!selectedPin || !itineraryRoute || !confirmedItineraryBasics) return
@@ -699,8 +819,23 @@ export function MapPage() {
     return () => window.removeEventListener('pintravel:toggle-festival-filter', onToggleFilter)
   }, [])
 
-  function onDateClick(day: number) {
-    const date = toIsoDate(day)
+  function shiftFilterViewMonth(delta: number) {
+    setFilterViewMonth((month) => {
+      const next = month + delta
+      if (next < 1) return 12
+      if (next > 12) return 1
+      return next
+    })
+  }
+
+  function resetFestivalFilter() {
+    const { viewMonth, range } = createDefaultFestivalFilterState()
+    setFestivalFilterEnabled(false)
+    setFilterViewMonth(viewMonth)
+    setFilterRange(range)
+  }
+
+  function onDateClick(date: string) {
     setFestivalFilterEnabled(true)
     setFilterRange((range) => {
       if (range.from !== range.to) return { from: date, to: date }
@@ -987,13 +1122,8 @@ export function MapPage() {
   }
 
   function clearItineraryRoute() {
-    setItineraryRoute(null)
-    setItineraryRouteError(null)
-    setConfirmedItineraryBasics(null)
-    setItineraryMapDay('all')
-    setItinerarySummaryPinsOn(false)
-    setScheduleSideTab('itinerary')
-    setScheduleSaveFeedback(null)
+    if (collabSessionId && !collab.isHost) return
+    applyRemoteItinerary(emptyCollabItinerary())
   }
 
   async function fetchItineraryRouteForDeparture(departure: string) {
@@ -1035,6 +1165,7 @@ export function MapPage() {
   }
 
   async function handleItineraryScheduleConfirm(payload: ItineraryScheduleConfirmPayload) {
+    if (collabSessionId && !collab.isHost) return
     setScheduleModalOpen(false)
     setConfirmedItineraryBasics(payload)
     setItineraryRoute(null)
@@ -1046,6 +1177,7 @@ export function MapPage() {
   }
 
   function handleCartItineraryPrimaryClick() {
+    if (collabSessionId && !collab.isHost) return
     if (itineraryRoute && confirmedItineraryBasics) {
       void fetchItineraryRouteForDeparture(confirmedItineraryBasics.departure)
       return
@@ -1054,6 +1186,7 @@ export function MapPage() {
   }
 
   async function handleConfirmScheduleClick() {
+    if (collabSessionId && !collab.isHost) return
     if (!itineraryRoute || !confirmedItineraryBasics) return
     const authToken = typeof window !== 'undefined' ? localStorage.getItem('pintravel_token') : null
     if (!authToken) {
@@ -1355,7 +1488,7 @@ export function MapPage() {
         const d = stopDay[s.order - 1] ?? 0
         pushMarker(
           new maps.LatLng(s.lat, s.lng),
-          createItineraryOrderMarkerHtml(s.order, legsOk ? d : undefined),
+          createItineraryStopMarkerHtml(s.order, legsOk ? d : undefined, cartDays, tripHotelId),
         )
       })
     } else {
@@ -1367,7 +1500,7 @@ export function MapPage() {
       route.stops.forEach((s) => {
         const d = stopDay[s.order - 1] ?? 0
         if (d !== D) return
-        pushMarker(new maps.LatLng(s.lat, s.lng), createItineraryOrderMarkerHtml(s.order, D))
+        pushMarker(new maps.LatLng(s.lat, s.lng), createItineraryStopMarkerHtml(s.order, D, cartDays, tripHotelId))
       })
     }
 
@@ -1413,7 +1546,7 @@ export function MapPage() {
       itineraryMarkersRef.current.forEach((m) => m.setMap(null))
       itineraryMarkersRef.current = []
     }
-  }, [itineraryRoute, mapReady, itineraryMapDay, stopDayIndices])
+  }, [itineraryRoute, mapReady, itineraryMapDay, stopDayIndices, cartDays, tripHotelId])
 
   const showMapLanBanner = !mapLanHintDismissed && (mapLanAuthHint != null || mapNaverAuthFailed)
 
@@ -1495,7 +1628,10 @@ export function MapPage() {
             aria-pressed={itinerarySummaryPinsOn}
             aria-label="정보 요약 장소 핀 표시"
             title="일정을 보면서 장소를 고르거나 장바구니를 수정할 수 있어요"
+            disabled={Boolean(collabSessionId && !collab.isHost)}
+            title={collabManageItinerary ? undefined : '호스트 화면과 동일하게 표시돼요'}
             onClick={() => {
+              if (collabSessionId && !collab.isHost) return
               setItinerarySummaryPinsOn((v) => {
                 const next = !v
                 if (!next) setSelectedPin(null)
@@ -1514,42 +1650,58 @@ export function MapPage() {
             {festivalFilterEnabled ? `필터 적용: ${filterRangeLabel}` : '기간을 선택하면 필터가 적용돼요'}
           </div>
           <div className="mapDateHeader">
-            <button type="button" aria-label="이전 달">
+            <button type="button" aria-label="이전 달" onClick={() => shiftFilterViewMonth(-1)}>
               ‹
             </button>
-            <select aria-label="월" value="Apr" onChange={() => undefined}>
-              <option>Apr</option>
+            <select
+              aria-label="월"
+              value={String(filterViewMonth)}
+              onChange={(e) => setFilterViewMonth(Number(e.target.value))}
+            >
+              {MAP_FILTER_MONTH_OPTIONS.map((m) => (
+                <option key={m} value={m}>
+                  {m}월
+                </option>
+              ))}
             </select>
             <select aria-label="연도" value={String(FILTER_YEAR)} onChange={() => undefined}>
-              <option>{FILTER_YEAR}</option>
+              <option value={FILTER_YEAR}>{FILTER_YEAR}</option>
             </select>
-            <button type="button" aria-label="다음 달">
+            <button type="button" aria-label="다음 달" onClick={() => shiftFilterViewMonth(1)}>
               ›
             </button>
           </div>
           <div className="mapMiniCalendar">
-            {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((day) => (
+            {MAP_CALENDAR_DOW.map((day) => (
               <span key={day} className="mutedDay">
                 {day}
               </span>
             ))}
-            {Array.from({ length: 35 }, (_, idx) => {
-              const day = idx + 1
-              const date = day <= FILTER_DAYS ? toIsoDate(day) : null
-              const active = Boolean(date && festivalFilterEnabled && date >= filterRange.from && date <= filterRange.to)
+            {filterCalendarCells.map((cell) => {
+              const active = Boolean(
+                cell.inMonth && festivalFilterEnabled && cell.date >= filterRange.from && cell.date <= filterRange.to,
+              )
               return (
                 <button
-                  key={day}
-                  className={active ? 'selectedDay' : ''}
+                  key={cell.date}
+                  className={`${active ? 'selectedDay' : ''} ${cell.inMonth ? '' : 'mutedCalendarDay'}`.trim()}
                   type="button"
-                  disabled={!date}
-                  onClick={() => date && onDateClick(day)}
+                  disabled={!cell.inMonth}
+                  onClick={() => cell.inMonth && onDateClick(cell.date)}
                 >
-                  {day <= 30 ? day : ''}
+                  {cell.day}
                 </button>
               )
             })}
           </div>
+          <button
+            type="button"
+            className="mapDateResetBtn"
+            aria-label="축제 날짜 필터 초기화"
+            onClick={resetFestivalFilter}
+          >
+            초기화
+          </button>
         </aside>
       ) : null}
 
@@ -1570,9 +1722,13 @@ export function MapPage() {
         <aside className="mapSideTabPanel" aria-label="일정 및 장소 정보">
           <div className="mapSideTabPanelHeader">
             <span className="mapSideTabPanelHeaderSpacer" />
-            <button type="button" className="mapItineraryClose" aria-label="일정 패널 닫기" onClick={clearItineraryRoute}>
-              ×
-            </button>
+            {collabManageItinerary ? (
+              <button type="button" className="mapItineraryClose" aria-label="일정 패널 닫기" onClick={clearItineraryRoute}>
+                ×
+              </button>
+            ) : (
+              <span className="mapSideTabPanelHeaderSpacer" />
+            )}
           </div>
           <div className="mapSideTabBar" role="tablist" aria-label="보기 전환">
             <button
@@ -1613,6 +1769,10 @@ export function MapPage() {
                 selectedMapItineraryDay={itineraryMapDay}
                 onSelectMapItineraryDay={setItineraryMapDay}
                 onClose={clearItineraryRoute}
+                narrativeFromHost={itineraryNarrative}
+                narrativeReadonly={Boolean(collabSessionId && !collab.isHost)}
+                onNarrativeChange={collabManageItinerary ? setItineraryNarrative : undefined}
+                viewControlsReadonly={Boolean(collabSessionId && !collab.isHost)}
               />
             )}
           </div>
@@ -1689,9 +1849,13 @@ export function MapPage() {
                 <button
                   className="mapCartRegenerateBtn"
                   type="button"
-                  disabled={itineraryRouteLoading || scheduleSaveBusy}
+                  disabled={!collabManageItinerary || itineraryRouteLoading || scheduleSaveBusy}
                   aria-label="수정된 장바구니로 일정 경로 다시 계산"
-                  title="장바구니 변경을 반영해 경로를 다시 계산해요"
+                  title={
+                    collabManageItinerary
+                      ? '장바구니 변경을 반영해 경로를 다시 계산해요'
+                      : '호스트만 일정을 다시 생성할 수 있어요'
+                  }
                   onClick={handleCartItineraryPrimaryClick}
                 >
                   재생성
@@ -1699,8 +1863,9 @@ export function MapPage() {
                 <button
                   className="mapCartConfirmBtn"
                   type="button"
-                  disabled={itineraryRouteLoading || scheduleSaveBusy}
+                  disabled={!collabManageItinerary || itineraryRouteLoading || scheduleSaveBusy}
                   aria-label="확정 일정을 서버에 저장"
+                  title={collabManageItinerary ? undefined : '호스트만 일정을 확정할 수 있어요'}
                   onClick={() => void handleConfirmScheduleClick()}
                 >
                   일정 확정
@@ -1710,8 +1875,9 @@ export function MapPage() {
               <button
                 className="mapCartCreateBtn"
                 type="button"
-                disabled={itineraryRouteLoading}
+                disabled={!collabManageItinerary || itineraryRouteLoading}
                 aria-label="출발지와 시작일을 입력해 일정 생성"
+                title={collabManageItinerary ? undefined : '호스트만 일정을 생성할 수 있어요'}
                 onClick={handleCartItineraryPrimaryClick}
               >
                 일정 생성
@@ -1738,7 +1904,7 @@ export function MapPage() {
 
       {itineraryRouteLoading ? (
         <div className="mapItineraryLoading" role="status">
-          경로를 계산하는 중이에요…
+          {collabSessionId && !collab.isHost ? '호스트가 경로를 계산하는 중이에요…' : '경로를 계산하는 중이에요…'}
         </div>
       ) : null}
 

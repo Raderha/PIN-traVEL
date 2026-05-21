@@ -6,7 +6,8 @@ import { nanoid } from "nanoid";
 
 // 개발용 인메모리 저장소 (DB 연동 전까지)
 export const users = new Map(); // id -> {id, username, passwordHash}
-export const sessions = new Map(); // id -> session state
+/** UC7 협업 세션 런타임 캐시 — 영속 저장은 `collab_sessions` 컬렉션 */
+export const sessions = new Map(); // id -> { id, hostUserId, createdAt, state }
 export const places = new Map(); // id -> place
 
 // 샘플 데이터(지도 핀 테스트용)

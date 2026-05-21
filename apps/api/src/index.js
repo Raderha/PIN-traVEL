@@ -14,6 +14,12 @@ import { fileURLToPath } from "node:url";
 import { registerRoutes } from "./routes/index.js";
 import { attachSocketServer } from "./realtime/socket.js";
 import { corsOriginCallback } from "./security/corsOrigins.js";
+import {
+  ensureCollabSessionsIndexes,
+  flushAllCachedCollabSessions,
+  startCollabSessionPersistence,
+  stopCollabSessionPersistence,
+} from "./storage/collabSessions.js";
 import { closeMongo, connectMongo } from "./storage/mongo.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -29,6 +35,9 @@ if (process.env.NODE_ENV !== "production") {
 async function main() {
   const { db } = await connectMongo();
   console.log(`[api] mongodb connected: ${db.databaseName}`);
+
+  await ensureCollabSessionsIndexes();
+  startCollabSessionPersistence();
 
   const app = express();
   app.use(express.json({ limit: "1mb" }));
@@ -52,6 +61,8 @@ async function main() {
     console.log(`[api] shutdown (${signal})`);
     server.close(() => {});
     try {
+      stopCollabSessionPersistence();
+      await flushAllCachedCollabSessions();
       await closeMongo();
     } finally {
       process.exit(0);

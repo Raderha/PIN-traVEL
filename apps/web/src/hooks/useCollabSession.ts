@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
+import { useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react'
 import { io, type Socket } from 'socket.io-client'
 
-import { fetchSession, type CollabSessionState } from '../lib/api'
+import { fetchSession, type CollabSessionState, type SummaryPin } from '../lib/api'
+import { normalizeCollabCartPayload } from '../lib/collabCart'
+import { emptyCollabItinerary, normalizeCollabItineraryPayload, type CollabItineraryPayload } from '../lib/collabItinerary'
 
 export type RemoteCursor = {
   username: string
@@ -28,6 +30,12 @@ type UseCollabSessionParams = {
   mapRef: RefObject<NaverMapLike | null>
   mapElementRef: RefObject<HTMLElement | null>
   getNaverMaps: () => { LatLng: new (lat: number, lng: number) => unknown } | undefined
+  cartDays: SummaryPin[][]
+  tripHotelId: string | null
+  setCartDays: Dispatch<SetStateAction<SummaryPin[][]>>
+  setTripHotelId: Dispatch<SetStateAction<string | null>>
+  itineraryPayload: CollabItineraryPayload
+  onApplyRemoteItinerary: (raw: unknown) => void
 }
 
 function readUsername(): string {
@@ -124,6 +132,12 @@ export function useCollabSession({
   mapRef,
   mapElementRef,
   getNaverMaps,
+  cartDays,
+  tripHotelId,
+  setCartDays,
+  setTripHotelId,
+  itineraryPayload,
+  onApplyRemoteItinerary,
 }: UseCollabSessionParams) {
   const [connected, setConnected] = useState(false)
   const [isHost, setIsHost] = useState(false)
@@ -135,35 +149,99 @@ export function useCollabSession({
   const userIdRef = useRef(readUserId())
   const isHostRef = useRef(false)
   const applyingRemoteMapRef = useRef(false)
+  const applyingRemoteCartRef = useRef(false)
+  const applyingRemoteItineraryRef = useRef(false)
+  const lastEmittedCartRef = useRef('')
+  const lastEmittedItineraryRef = useRef('')
   const pendingGuestViewRef = useRef<MapView | null>(null)
   const lastCursorEmitRef = useRef(0)
   const collabMapListenersRef = useRef<Array<{ remove?: () => void }>>([])
 
-  const applyGuestView = useCallback(
-    (view: MapView) => {
-      const map = mapRef.current
-      if (!map) {
-        pendingGuestViewRef.current = view
-        return
-      }
-      applyingRemoteMapRef.current = true
-      applyMapView(map, getNaverMaps, view)
-      window.setTimeout(() => {
-        applyingRemoteMapRef.current = false
-      }, 400)
-    },
-    [mapRef, getNaverMaps],
-  )
+  const cartDaysRef = useRef(cartDays)
+  const tripHotelIdRef = useRef(tripHotelId)
+  const setCartDaysRef = useRef(setCartDays)
+  const setTripHotelIdRef = useRef(setTripHotelId)
+  const mapRefStable = useRef(mapRef)
+  const getNaverMapsRef = useRef(getNaverMaps)
+  const itineraryPayloadRef = useRef(itineraryPayload)
+  const onApplyRemoteItineraryRef = useRef(onApplyRemoteItinerary)
 
-  const emitMapViewNow = useCallback(() => {
+  cartDaysRef.current = cartDays
+  itineraryPayloadRef.current = itineraryPayload
+  onApplyRemoteItineraryRef.current = onApplyRemoteItinerary
+  tripHotelIdRef.current = tripHotelId
+  setCartDaysRef.current = setCartDays
+  setTripHotelIdRef.current = setTripHotelId
+  mapRefStable.current = mapRef
+  getNaverMapsRef.current = getNaverMaps
+
+  const applyRemoteCartRef = useRef((raw: unknown) => {
+    const payload = normalizeCollabCartPayload(raw)
+    applyingRemoteCartRef.current = true
+    lastEmittedCartRef.current = JSON.stringify(payload)
+    setCartDaysRef.current(payload.cartDays.length > 0 ? payload.cartDays : [[]])
+    setTripHotelIdRef.current(payload.tripHotelId)
+    window.setTimeout(() => {
+      applyingRemoteCartRef.current = false
+    }, 80)
+  })
+
+  const applyRemoteItineraryRef = useRef((raw: unknown) => {
+    applyingRemoteItineraryRef.current = true
+    const payload = normalizeCollabItineraryPayload(raw)
+    lastEmittedItineraryRef.current = JSON.stringify(payload)
+    onApplyRemoteItineraryRef.current(payload)
+    window.setTimeout(() => {
+      applyingRemoteItineraryRef.current = false
+    }, 80)
+  })
+
+  const emitItineraryNowRef = useRef(() => {
+    if (!isHostRef.current || applyingRemoteItineraryRef.current) return false
+    const payload = itineraryPayloadRef.current
+    const hasItinerary = Boolean(payload.basics && payload.route)
+    const wire = hasItinerary ? payload : null
+    const serialized = JSON.stringify(wire)
+    if (serialized === lastEmittedItineraryRef.current) return true
+    if (!socketRef.current?.connected) return false
+    lastEmittedItineraryRef.current = serialized
+    socketRef.current.emit('session:itinerary', wire)
+    return true
+  })
+
+  const emitCartNowRef = useRef(() => {
+    if (applyingRemoteCartRef.current) return false
+    const payload = { cartDays: cartDaysRef.current, tripHotelId: tripHotelIdRef.current ?? null }
+    const serialized = JSON.stringify(payload)
+    if (serialized === lastEmittedCartRef.current) return true
+    if (!socketRef.current?.connected) return false
+    lastEmittedCartRef.current = serialized
+    socketRef.current.emit('session:cart', payload)
+    return true
+  })
+
+  const applyGuestViewRef = useRef((view: MapView) => {
+    const map = mapRefStable.current.current
+    if (!map) {
+      pendingGuestViewRef.current = view
+      return
+    }
+    applyingRemoteMapRef.current = true
+    applyMapView(map, getNaverMapsRef.current, view)
+    window.setTimeout(() => {
+      applyingRemoteMapRef.current = false
+    }, 400)
+  })
+
+  const emitMapViewNowRef = useRef(() => {
     if (!isHostRef.current || applyingRemoteMapRef.current) return false
-    const map = mapRef.current
+    const map = mapRefStable.current.current
     if (!map) return false
     const view = readMapView(map)
     if (!view || !socketRef.current?.connected) return false
     socketRef.current.emit('session:map', view)
     return true
-  }, [mapRef])
+  })
 
   useEffect(() => {
     usernameRef.current = readUsername()
@@ -199,9 +277,8 @@ export function useCollabSession({
         })
         socketRef.current = socket
 
-        const onConnect = () => {
+        const joinSession = () => {
           if (cancelled) return
-          setConnected(true)
           setSessionError(null)
           socket!.emit('session:join', {
             sessionId,
@@ -210,16 +287,61 @@ export function useCollabSession({
           })
         }
 
+        const onSessionError = (payload: { sessionId?: string; error?: string }) => {
+          if (cancelled || payload.sessionId !== sessionId) return
+          setConnected(false)
+          isHostRef.current = false
+          setIsHost(false)
+          if (payload.error === 'HOST_RECONNECT_NOT_ALLOWED') {
+            setSessionError('호스트는 같은 세션에 다시 접속할 수 없어요. 새 협업 세션을 만들어 주세요.')
+          } else if (payload.error === 'NOT_FOUND') {
+            setSessionError(
+              host
+                ? '세션을 찾을 수 없어요. 새 협업 세션을 만들어 주세요.'
+                : '세션이 종료됐거나 없어요. 호스트에게 새 초대 링크를 요청해 주세요.',
+            )
+          } else {
+            setSessionError('세션에 참가하지 못했어요.')
+          }
+        }
+
+        const onSessionEnded = (payload: { sessionId?: string }) => {
+          if (cancelled || (payload.sessionId && payload.sessionId !== sessionId)) return
+          setConnected(false)
+          setRemoteCursors([])
+          setSessionError('호스트가 세션을 종료했어요. 다시 참여하려면 호스트에게 새 초대 링크를 받아 주세요.')
+        }
+
         const onSessionState = (payload: { sessionId?: string; state?: CollabSessionState }) => {
-          if (cancelled || payload.sessionId !== sessionId || isHostRef.current) return
-          const view = stateMapView(payload.state)
-          if (view) applyGuestView(view)
+          if (cancelled || payload.sessionId !== sessionId) return
+          setConnected(true)
+          setSessionError(null)
+          if (!isHostRef.current) {
+            const view = stateMapView(payload.state)
+            if (view) applyGuestViewRef.current(view)
+            if (payload.state?.cart) applyRemoteCartRef.current(payload.state.cart)
+          }
+          if (payload.state?.itinerary) {
+            applyRemoteItineraryRef.current(payload.state.itinerary)
+          } else if (!isHostRef.current) {
+            applyRemoteItineraryRef.current(emptyCollabItinerary())
+          }
+        }
+
+        const onSessionItinerary = (itinerary: unknown) => {
+          if (cancelled || isHostRef.current) return
+          applyRemoteItineraryRef.current(itinerary ?? emptyCollabItinerary())
+        }
+
+        const onSessionCart = (cart: unknown) => {
+          if (cancelled) return
+          applyRemoteCartRef.current(cart)
         }
 
         const onSessionMap = (payload: { center?: { lat: number; lng: number }; zoom?: number }) => {
           if (cancelled || isHostRef.current) return
           if (!payload.center || payload.zoom == null) return
-          applyGuestView({ center: payload.center, zoom: payload.zoom })
+          applyGuestViewRef.current({ center: payload.center, zoom: payload.zoom })
         }
 
         const onSessionCursor = (payload: { username?: string; x?: number; y?: number }) => {
@@ -236,7 +358,11 @@ export function useCollabSession({
 
         const onMemberJoined = () => {
           if (cancelled || !isHostRef.current) return
-          window.setTimeout(() => emitMapViewNow(), 200)
+          window.setTimeout(() => {
+            emitMapViewNowRef.current()
+            emitCartNowRef.current()
+            emitItineraryNowRef.current()
+          }, 200)
         }
 
         const onMemberLeft = (payload: { username?: string }) => {
@@ -244,8 +370,12 @@ export function useCollabSession({
           setRemoteCursors((prev) => prev.filter((c) => c.username !== payload.username))
         }
 
-        socket.on('connect', onConnect)
+        socket.on('connect', joinSession)
+        socket.on('session:error', onSessionError)
+        socket.on('session:ended', onSessionEnded)
         socket.on('session:state', onSessionState)
+        socket.on('session:cart', onSessionCart)
+        socket.on('session:itinerary', onSessionItinerary)
         socket.on('session:map', onSessionMap)
         socket.on('session:cursor', onSessionCursor)
         socket.on('session:member-joined', onMemberJoined)
@@ -253,20 +383,34 @@ export function useCollabSession({
         socket.on('connect_error', (err) => {
           if (!cancelled) {
             console.warn('[collab] socket connect_error', err)
+            setConnected(false)
             setSessionError('실시간 연결에 실패했어요. API(4000)가 켜져 있는지 확인해 주세요.')
           }
         })
+        socket.on('disconnect', () => {
+          if (!cancelled) setConnected(false)
+        })
+
+        if (socket.connected) joinSession()
 
         if (!host) {
           const view = stateMapView(r.session.state)
-          if (view) applyGuestView(view)
+          if (view) applyGuestViewRef.current(view)
+          if (r.session.state?.cart) applyRemoteCartRef.current(r.session.state.cart)
+          applyRemoteItineraryRef.current(r.session.state?.itinerary ?? emptyCollabItinerary())
+        } else if (r.session.state?.itinerary) {
+          applyRemoteItineraryRef.current(r.session.state.itinerary)
         }
       } catch (err) {
         if (cancelled) return
         const code = err instanceof Error ? err.message : ''
         if (code === 'NOT_FOUND') {
+          const uid = userIdRef.current
+          const wasHost = Boolean(uid && host)
           setSessionError(
-            '세션을 찾을 수 없어요. 호스트가 세션을 만든 뒤 API가 재시작되지 않았는지 확인하고, 세션을 다시 만들어 주세요.',
+            wasHost
+              ? '세션을 찾을 수 없어요. 새 협업 세션을 만들어 주세요.'
+              : '세션이 종료됐거나 없어요. 호스트에게 새 초대 링크를 요청해 주세요.',
           )
         } else if (code === 'UNAUTHORIZED') {
           setSessionError('로그인이 필요해요.')
@@ -285,7 +429,7 @@ export function useCollabSession({
       setConnected(false)
       setRemoteCursors([])
     }
-  }, [sessionId, enabled, applyGuestView, emitMapViewNow])
+  }, [sessionId, enabled])
 
   useEffect(() => {
     if (!enabled || !sessionId || !mapReady) return
@@ -297,17 +441,17 @@ export function useCollabSession({
     const pending = pendingGuestViewRef.current
     if (!isHostRef.current && pending) {
       pendingGuestViewRef.current = null
-      applyGuestView(pending)
+      applyGuestViewRef.current(pending)
     }
 
     if (isHostRef.current) {
-      emitMapViewNow()
+      emitMapViewNowRef.current()
     }
 
     return () => {
       if (mapRef.current) setGuestMapInteraction(mapRef.current, false)
     }
-  }, [enabled, sessionId, mapReady, isHost, mapRef, applyGuestView, emitMapViewNow])
+  }, [enabled, sessionId, mapReady, isHost, mapRef])
 
   useEffect(() => {
     if (!enabled || !sessionId || !mapReady || !isHost) return
@@ -322,7 +466,7 @@ export function useCollabSession({
     const scheduleEmit = () => {
       if (emitTimer != null) window.clearTimeout(emitTimer)
       emitTimer = window.setTimeout(() => {
-        emitMapViewNow()
+        emitMapViewNowRef.current()
       }, 100)
     }
 
@@ -344,7 +488,7 @@ export function useCollabSession({
       collabMapListenersRef.current.forEach((l) => l.remove?.())
       collabMapListenersRef.current = []
     }
-  }, [enabled, sessionId, mapReady, isHost, mapRef, getNaverMaps, emitMapViewNow])
+  }, [enabled, sessionId, mapReady, isHost, mapRef, getNaverMaps])
 
   useEffect(() => {
     if (!enabled || !sessionId || !connected) return
@@ -369,6 +513,20 @@ export function useCollabSession({
     window.addEventListener('mousemove', onMove, { passive: true })
     return () => window.removeEventListener('mousemove', onMove)
   }, [enabled, sessionId, connected, mapElementRef])
+
+  useEffect(() => {
+    if (!enabled || !sessionId || !connected) return
+    if (applyingRemoteCartRef.current) return
+    const timer = window.setTimeout(() => emitCartNowRef.current(), 120)
+    return () => window.clearTimeout(timer)
+  }, [cartDays, tripHotelId, enabled, sessionId, connected])
+
+  useEffect(() => {
+    if (!enabled || !sessionId || !connected || !isHost) return
+    if (applyingRemoteItineraryRef.current) return
+    const timer = window.setTimeout(() => emitItineraryNowRef.current(), 120)
+    return () => window.clearTimeout(timer)
+  }, [itineraryPayload, enabled, sessionId, connected, isHost])
 
   useEffect(() => {
     if (!enabled) return

@@ -1,8 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 
-import { postItineraryScheduleNarrative, type ItineraryRouteResult, type SummaryPin } from '../lib/api'
+import { type ItineraryRouteResult, type SummaryPin } from '../lib/api'
+// import { postItineraryScheduleNarrative } from '../lib/api' — AI 일정 요약(Gemini) 비활성화
+import type { CollabItineraryNarrative } from '../lib/collabItinerary'
 import { itineraryDayColor, legIndicesForStopDay, maxStopDayIndex } from '../lib/itineraryPaths'
 import { computeStopDayIndicesFromCart } from '../lib/itineraryStopDays'
+import { isHotelPin, itineraryHomeIconUrl, itineraryStopBadgeHtml, pinForRouteStopOrder } from '../lib/pinHotel'
+
+/** false: `/api/itinerary/schedule-narrative`(Gemini) 호출·AI 일정 요약 UI 비표시 */
+const AI_SCHEDULE_NARRATIVE_ENABLED = false
 
 function formatDurationKo(ms: number) {
   const m = Math.max(1, Math.round(ms / 60_000))
@@ -80,6 +86,8 @@ function buildItineraryDownloadHtml(
   tripStartDate: string,
   route: ItineraryRouteResult,
   dayIndices: number[],
+  cartDays: SummaryPin[][],
+  tripHotelId: string | null,
   ai: ItineraryDownloadAiState,
 ): string {
   const maxD = dayIndices.length ? maxStopDayIndex(dayIndices) : 0
@@ -108,9 +116,12 @@ function buildItineraryDownloadHtml(
         ? `<h3 class="subTitle">방문지</h3><ul class="stopList">${stops
             .map((s) => {
               const bg = itineraryDayColor(dayIndices[s.order - 1] ?? 0)
+              const pin = pinForRouteStopOrder(s.order, cartDays, tripHotelId)
+              const hotel = Boolean(pin && isHotelPin(pin))
+              const badge = itineraryStopBadgeHtml(s.order, bg, hotel)
               const time = s.time?.trim() ? escapeHtml(s.time) : '정보 없음'
               const fee = s.fee?.trim() ? escapeHtml(s.fee) : '정보 없음'
-              return `<li class="stop"><div class="stopTitle"><span class="stopNum" style="background:${bg}">${s.order}</span>${escapeHtml(s.title)}</div><dl class="stopDl"><div><dt>관람/운영</dt><dd>${time}</dd></div><div><dt>입장료</dt><dd>${fee}</dd></div></dl></li>`
+              return `<li class="stop"><div class="stopTitle">${badge}${escapeHtml(s.title)}</div><dl class="stopDl"><div><dt>관람/운영</dt><dd>${time}</dd></div><div><dt>입장료</dt><dd>${fee}</dd></div></dl></li>`
             })
             .join('')}</ul>`
         : ''
@@ -128,6 +139,9 @@ function buildItineraryDownloadHtml(
       ? `<p class="sub">${escapeHtml(route.departure.roadAddress ?? route.departure.jibunAddress ?? '')}</p>`
       : ''
 
+  // AI 일정 요약(Gemini) — 비활성화
+  const aiBlock = ''
+  /*
   let aiBlock = '<h2 class="sectionTitle">AI 일정 요약</h2>'
   if (ai.scheduleLoading) {
     aiBlock += `<p class="muted">저장 시점에 AI 요약이 아직 생성 중이었을 수 있어요. 잠시 후 화면에서 다시 확인해 주세요.</p>`
@@ -140,6 +154,7 @@ function buildItineraryDownloadHtml(
   } else {
     aiBlock += `<p class="muted">AI 요약이 없습니다.</p>`
   }
+  */
 
   const css = `
 :root { color-scheme: light; }
@@ -167,6 +182,8 @@ h1.docTitle { font-size: 18px; font-weight: 900; color: #111827; margin: 0 0 14p
 .stop { padding: 12px 0; border-bottom: 1px solid #eef0f4; }
 .stopTitle { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 900; color: #111827; }
 .stopNum { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 999px; color: #fff; font-size: 12px; font-weight: 900; flex-shrink: 0; }
+.stopNum--hotel { background: transparent; border-radius: 0; }
+.stopNum--hotel img { width: 22px; height: 22px; object-fit: contain; display: block; }
 .stopDl { margin: 8px 0 0; }
 .stopDl > div { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 6px; padding: 4px 0; font-size: 12px; }
 .stopDl dt { color: #9ca3af; font-weight: 900; }
@@ -215,6 +232,14 @@ type ItineraryRoutePanelProps = {
   onClose: () => void
   /** 상세 정보 탭과 같은 패널 안에 넣을 때 — 바깥 `aside`·일정 제목 헤더 생략 */
   embedded?: boolean
+  /** 협업 게스트: 호스트가 생성한 AI 일정 문구 */
+  narrativeFromHost?: CollabItineraryNarrative
+  /** true면 schedule-narrative API를 호출하지 않음 */
+  narrativeReadonly?: boolean
+  /** 호스트: AI 요약 상태 변경 시 상위로 전달(세션 공유) */
+  onNarrativeChange?: (narrative: CollabItineraryNarrative) => void
+  /** 게스트: 일차 칩·지도 연동만 보기 */
+  viewControlsReadonly?: boolean
 }
 
 export function ItineraryRoutePanel({
@@ -226,11 +251,15 @@ export function ItineraryRoutePanel({
   onSelectMapItineraryDay,
   onClose,
   embedded = false,
+  narrativeFromHost,
+  narrativeReadonly = false,
+  onNarrativeChange,
+  viewControlsReadonly = false,
 }: ItineraryRoutePanelProps) {
   const [scheduleText, setScheduleText] = useState<string | null>(null)
   const [scheduleLoading, setScheduleLoading] = useState(false)
   const [scheduleError, setScheduleError] = useState<string | null>(null)
-  const [geminiOff, setGeminiOff] = useState(false)
+  const [geminiOff, setGeminiOff] = useState(!AI_SCHEDULE_NARRATIVE_ENABLED)
 
   const rawDayIndices = useMemo(() => computeStopDayIndicesFromCart(cartDays, tripHotelId), [cartDays, tripHotelId])
   const dayIndices = useMemo(
@@ -255,7 +284,9 @@ export function ItineraryRoutePanel({
     [tripStartDate, route.departure.query, route.legs, route.stops, dayIndices],
   )
 
+  /* Gemini AI 일정 요약 — 비활성화
   useEffect(() => {
+    if (narrativeReadonly || !AI_SCHEDULE_NARRATIVE_ENABLED) return
     const ac = new AbortController()
     setScheduleLoading(true)
     setScheduleError(null)
@@ -294,8 +325,33 @@ export function ItineraryRoutePanel({
       })
 
     return () => ac.abort()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [narrativeKey])
+  }, [narrativeKey, narrativeReadonly, tripStartDate, route, dayIndices])
+  */
+
+  useEffect(() => {
+    if (AI_SCHEDULE_NARRATIVE_ENABLED || narrativeReadonly) return
+    setScheduleLoading(false)
+    setScheduleError(null)
+    setScheduleText(null)
+    setGeminiOff(true)
+  }, [narrativeKey, narrativeReadonly])
+
+  useEffect(() => {
+    if (!onNarrativeChange || narrativeReadonly) return
+    onNarrativeChange({
+      text: scheduleText,
+      loading: scheduleLoading,
+      error: scheduleError,
+      geminiOff,
+    })
+  }, [scheduleText, scheduleLoading, scheduleError, geminiOff, onNarrativeChange, narrativeReadonly])
+
+  const displayNarrative = narrativeReadonly && narrativeFromHost ? narrativeFromHost : {
+    text: scheduleText,
+    loading: scheduleLoading,
+    error: scheduleError,
+    geminiOff,
+  }
 
   const downloadName = useMemo(() => {
     const safe = tripStartDate.replace(/[^\d-]/g, '')
@@ -303,11 +359,11 @@ export function ItineraryRoutePanel({
   }, [tripStartDate])
 
   function onDownload() {
-    const html = buildItineraryDownloadHtml(tripStartDate, route, dayIndices, {
-      scheduleText,
-      scheduleLoading,
-      scheduleError,
-      geminiOff,
+    const html = buildItineraryDownloadHtml(tripStartDate, route, dayIndices, cartDays, tripHotelId, {
+      scheduleText: displayNarrative.text,
+      scheduleLoading: displayNarrative.loading,
+      scheduleError: displayNarrative.error,
+      geminiOff: displayNarrative.geminiOff,
     })
     const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
     const url = URL.createObjectURL(blob)
@@ -343,6 +399,7 @@ export function ItineraryRoutePanel({
                   ? { borderColor: color, color, boxShadow: `inset 0 -2px 0 ${color}` }
                   : undefined
               }
+              disabled={viewControlsReadonly}
               onClick={() => onSelectMapItineraryDay(d)}
             >
               {d !== 'all' ? (
@@ -415,15 +472,22 @@ export function ItineraryRoutePanel({
                 <>
                   <h3 className="mapItinerarySubTitle">방문지</h3>
                   <ul className="mapItineraryStopList">
-                    {stops.map((s) => (
+                    {stops.map((s) => {
+                      const pin = pinForRouteStopOrder(s.order, cartDays, tripHotelId)
+                      const hotel = Boolean(pin && isHotelPin(pin))
+                      const dayColor = itineraryDayColor(dayIndices[s.order - 1] ?? 0)
+                      return (
                       <li key={s.order} className="mapItineraryStop">
                         <div className="mapItineraryStopTitle">
-                          <span
-                            className="mapItineraryStopNum"
-                            style={{ background: itineraryDayColor(dayIndices[s.order - 1] ?? 0) }}
-                          >
-                            {s.order}
-                          </span>
+                          {hotel ? (
+                            <span className="mapItineraryStopNum mapItineraryStopNum--hotel">
+                              <img src={itineraryHomeIconUrl} alt="" />
+                            </span>
+                          ) : (
+                            <span className="mapItineraryStopNum" style={{ background: dayColor }}>
+                              {s.order}
+                            </span>
+                          )}
                           {s.title}
                         </div>
                         <dl className="mapItineraryStopDl">
@@ -437,7 +501,7 @@ export function ItineraryRoutePanel({
                           </div>
                         </dl>
                       </li>
-                    ))}
+                    )})}
                   </ul>
                 </>
               ) : null}
@@ -445,22 +509,24 @@ export function ItineraryRoutePanel({
           )
         })}
 
+        {/* AI 일정 요약(Gemini) — 비활성화
         <h2 className="mapItinerarySectionTitle">AI 일정 요약</h2>
-        {scheduleLoading ? <p className="mapItineraryScheduleLoading">Gemini가 일정을 정리하는 중…</p> : null}
-        {geminiOff ? (
+        {displayNarrative.loading ? <p className="mapItineraryScheduleLoading">Gemini가 일정을 정리하는 중…</p> : null}
+        {displayNarrative.geminiOff ? (
           <p className="mapItinerarySub mapItinerarySub--scheduleHint">
             서버에 <code className="mapItineraryCode">GEMINI_API_KEY</code>가 없으면 AI 요약은 생략돼요.
           </p>
         ) : null}
-        {scheduleError ? (
-          <pre className="mapItineraryScheduleError mapItineraryScheduleError--pre">{scheduleError}</pre>
+        {displayNarrative.error ? (
+          <pre className="mapItineraryScheduleError mapItineraryScheduleError--pre">{displayNarrative.error}</pre>
         ) : null}
-        {scheduleText ? <div className="mapItineraryGeminiBody">{scheduleText}</div> : null}
-        {!scheduleLoading && (geminiOff || scheduleError) ? (
+        {displayNarrative.text ? <div className="mapItineraryGeminiBody">{displayNarrative.text}</div> : null}
+        {!displayNarrative.loading && (displayNarrative.geminiOff || displayNarrative.error) ? (
           <p className="mapItinerarySub mapItinerarySub--scheduleHint">
             일차별 이동·방문지는 위 섹션에서 확인할 수 있어요.
           </p>
         ) : null}
+        */}
       </div>
 
       <div className="mapItineraryPanelFooter">
