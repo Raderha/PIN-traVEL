@@ -182,7 +182,7 @@ export async function geminiNormalizeToRoadAddressWithDebug(userPlace, apiKey, s
         continue;
       }
 
-      if (r.geminiHttpStatus === 404 || r.geminiHttpStatus === 429) {
+      if (r.geminiHttpStatus === 404 || r.geminiHttpStatus === 429 || r.geminiHttpStatus === 503) {
         continue;
       }
 

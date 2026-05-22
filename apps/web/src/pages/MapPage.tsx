@@ -69,6 +69,7 @@ type NaverMaps = {
     position: NaverLatLng
     map: NaverMapInstance
     icon?: { content: string; size: NaverSize; anchor: NaverPoint }
+    zIndex?: number
   }) => NaverMarkerInstance
   Event: {
     addListener(target: unknown, eventName: string, listener: () => void): NaverEventListener
@@ -574,14 +575,20 @@ function createItineraryStopMarkerHtml(
   return createItineraryOrderMarkerHtml(order, dayIndex)
 }
 
+function createRecommendationMarkerHtml(kind: 'food' | 'hotel', index: number) {
+  return `<div class="recommendationMapMarker recommendationMapMarker--${kind}" aria-hidden="true">${index}</div>`
+}
+
 export function MapPage() {
   const location = useLocation()
   const nav = useNavigate()
   const mapElementRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<NaverMapInstance | null>(null)
   const markersRef = useRef<NaverMarkerInstance[]>([])
+  const recommendationMarkersRef = useRef<NaverMarkerInstance[]>([])
   const mapListenersRef = useRef<NaverEventListener[]>([])
   const markerListenersRef = useRef<NaverEventListener[]>([])
+  const recommendationMarkerListenersRef = useRef<NaverEventListener[]>([])
   const [summaryPins, setSummaryPins] = useState<SummaryPin[]>([])
   const [selectedPin, setSelectedPin] = useState<SummaryPin | null>(null)
   const [cartDays, setCartDays] = useState<SummaryPin[][]>(() => loadStoredCartDays())
@@ -612,6 +619,7 @@ export function MapPage() {
   const [itineraryRouteError, setItineraryRouteError] = useState<string | null>(null)
   const [scheduleSaveBusy, setScheduleSaveBusy] = useState(false)
   const [scheduleSaveFeedback, setScheduleSaveFeedback] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
+  const [scheduleConfirmDoneOpen, setScheduleConfirmDoneOpen] = useState(false)
   /** 일정 경로가 있을 때 정보 요약 핀을 지도에 다시 표시 */
   const [itinerarySummaryPinsOn, setItinerarySummaryPinsOn] = useState(false)
   const [itineraryNarrative, setItineraryNarrative] = useState(emptyCollabItineraryNarrative)
@@ -713,7 +721,8 @@ export function MapPage() {
     ],
   )
 
-  function applyRemoteItinerary(payload: CollabItineraryPayload) {
+  function applyRemoteItinerary(raw: unknown) {
+    const payload = raw as CollabItineraryPayload
     setConfirmedItineraryBasics(payload.basics)
     setItineraryRoute(payload.route)
     setItineraryNarrative(payload.narrative)
@@ -926,13 +935,16 @@ export function MapPage() {
             <div className="mapAiRecommendGroup">
               <h3>주변 식당 추천</h3>
               {selectedAiRecommendations.food.items.length ? (
-                selectedAiRecommendations.food.items.map((item) => (
+                selectedAiRecommendations.food.items.map((item, index) => (
                   <article key={`food:${item.contentId}`} className="mapAiRecommendItem">
                     <div className="mapAiRecommendThumb">
                       {item.image ? <img src={item.image} alt="" /> : <div className="thumbFallback" />}
                     </div>
                     <div className="mapAiRecommendBody">
-                      <div className="mapAiRecommendTitle">{item.title}</div>
+                      <div className="mapAiRecommendTitleRow">
+                        <span className="mapAiRecommendBadge mapAiRecommendBadge--food">식당 {index + 1}</span>
+                        <div className="mapAiRecommendTitle">{item.title}</div>
+                      </div>
                       <div className="mapAiRecommendMeta">{formatDistance(item.distanceMeters)}</div>
                       <div className="mapAiRecommendDesc">{recommendationAddressText(item)}</div>
                       <button
@@ -956,13 +968,16 @@ export function MapPage() {
             <div className="mapAiRecommendGroup">
               <h3>주변 숙소 추천</h3>
               {selectedAiRecommendations.hotel.items.length ? (
-                selectedAiRecommendations.hotel.items.map((item) => (
+                selectedAiRecommendations.hotel.items.map((item, index) => (
                   <article key={`hotel:${item.contentId}`} className="mapAiRecommendItem">
                     <div className="mapAiRecommendThumb">
                       {item.image ? <img src={item.image} alt="" /> : <div className="thumbFallback" />}
                     </div>
                     <div className="mapAiRecommendBody">
-                      <div className="mapAiRecommendTitle">{item.title}</div>
+                      <div className="mapAiRecommendTitleRow">
+                        <span className="mapAiRecommendBadge mapAiRecommendBadge--hotel">숙소 {index + 1}</span>
+                        <div className="mapAiRecommendTitle">{item.title}</div>
+                      </div>
                       <div className="mapAiRecommendMeta">{formatDistance(item.distanceMeters)}</div>
                       <div className="mapAiRecommendDesc">{recommendationAddressText(item)}</div>
                       <button
@@ -1198,6 +1213,7 @@ export function MapPage() {
     try {
       await postScheduleConfirm({
         region: SCHEDULE_DEFAULT_REGION,
+        collabSessionId,
         tripStartDate: confirmedItineraryBasics.tripStartDate,
         departure: confirmedItineraryBasics.departure,
         tripHotelId,
@@ -1205,6 +1221,7 @@ export function MapPage() {
         ...buildRouteCompactForSchedule(itineraryRoute),
       })
       setScheduleSaveFeedback({ kind: 'ok', text: '일정이 저장되었어요.' })
+      setScheduleConfirmDoneOpen(true)
     } catch (err) {
       const code = err instanceof Error ? err.message : 'FAILED'
       if (code === 'UNAUTHORIZED') requireLogin()
@@ -1240,6 +1257,9 @@ export function MapPage() {
       }
       markersRef.current.forEach((marker) => marker.setMap(null))
       markersRef.current = []
+      recommendationMarkersRef.current.forEach((marker) => marker.setMap(null))
+      recommendationMarkersRef.current = []
+      recommendationMarkerListenersRef.current = []
     }
   }, [])
 
@@ -1374,11 +1394,57 @@ export function MapPage() {
     return () => {
       mapListenersRef.current.forEach((listener) => maps.Event.removeListener(listener))
       markerListenersRef.current.forEach((listener) => maps.Event.removeListener(listener))
+      recommendationMarkerListenersRef.current.forEach((listener) => maps.Event.removeListener(listener))
       mapListenersRef.current = []
       markerListenersRef.current = []
+      recommendationMarkerListenersRef.current = []
       clearMarkers()
     }
   }, [filteredSummaryPins, mapReady, itineraryRoute, itinerarySummaryPinsOn])
+
+  useEffect(() => {
+    const maps = getNaverMaps()
+    const map = mapRef.current
+    if (!mapReady || !maps || !map) return
+    const naverMaps = maps
+    const mapInstance = map
+
+    function clearRecommendationMarkers() {
+      recommendationMarkerListenersRef.current.forEach((listener) => naverMaps.Event.removeListener(listener))
+      recommendationMarkerListenersRef.current = []
+      recommendationMarkersRef.current.forEach((marker) => marker.setMap(null))
+      recommendationMarkersRef.current = []
+    }
+
+    clearRecommendationMarkers()
+
+    if (!selectedAiRecommendations) return clearRecommendationMarkers
+
+    const addRecommendationMarker = (item: AiRecommendationItem, kind: 'food' | 'hotel', index: number) => {
+      if (!item.location) return
+      const marker = new naverMaps.Marker({
+        position: new naverMaps.LatLng(item.location.lat, item.location.lng),
+        map: mapInstance,
+        zIndex: 1000,
+        icon: {
+          content: createRecommendationMarkerHtml(kind, index),
+          size: new naverMaps.Size(34, 34),
+          anchor: new naverMaps.Point(17, 34),
+        },
+      })
+      recommendationMarkersRef.current.push(marker)
+      recommendationMarkerListenersRef.current.push(
+        naverMaps.Event.addListener(marker, 'click', () =>
+          mapInstance.setCenter(new naverMaps.LatLng(item.location!.lat, item.location!.lng)),
+        ),
+      )
+    }
+
+    selectedAiRecommendations.food.items.forEach((item, index) => addRecommendationMarker(item, 'food', index + 1))
+    selectedAiRecommendations.hotel.items.forEach((item, index) => addRecommendationMarker(item, 'hotel', index + 1))
+
+    return clearRecommendationMarkers
+  }, [mapReady, selectedAiRecommendations])
 
   useEffect(() => {
     const maps = getNaverMaps() as unknown as {
@@ -1627,9 +1693,8 @@ export function MapPage() {
             className={`mapPinToggle ${itinerarySummaryPinsOn ? 'mapPinToggle--on' : ''}`}
             aria-pressed={itinerarySummaryPinsOn}
             aria-label="정보 요약 장소 핀 표시"
-            title="일정을 보면서 장소를 고르거나 장바구니를 수정할 수 있어요"
+            title={collabManageItinerary ? '일정을 보면서 장소를 고르거나 장바구니를 수정할 수 있어요' : '호스트 화면과 동일하게 표시돼요'}
             disabled={Boolean(collabSessionId && !collab.isHost)}
-            title={collabManageItinerary ? undefined : '호스트 화면과 동일하게 표시돼요'}
             onClick={() => {
               if (collabSessionId && !collab.isHost) return
               setItinerarySummaryPinsOn((v) => {
@@ -1901,6 +1966,32 @@ export function MapPage() {
         onClose={() => setScheduleModalOpen(false)}
         onConfirm={handleItineraryScheduleConfirm}
       />
+
+      {scheduleConfirmDoneOpen ? (
+        <div className="itineraryModalRoot">
+          <div className="itineraryModalBackdrop" aria-hidden="true" />
+          <div className="itineraryConfirmDoneModal" role="dialog" aria-modal="true" aria-labelledby="schedule-confirm-done-title">
+            <div className="itineraryConfirmDoneIcon" aria-hidden="true">
+              ✓
+            </div>
+            <h2 id="schedule-confirm-done-title" className="itineraryModalTitle">
+              일정 확정 완료
+            </h2>
+            <p className="itineraryConfirmDoneText">
+              일정이 확정되었습니다. 확정된 일정은 마이페이지에 기록됩니다.
+            </p>
+            <div className="itineraryModalFooter">
+              <button
+                type="button"
+                className="itineraryModalBtn itineraryModalBtnPrimary"
+                onClick={() => setScheduleConfirmDoneOpen(false)}
+              >
+                확인
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {itineraryRouteLoading ? (
         <div className="mapItineraryLoading" role="status">

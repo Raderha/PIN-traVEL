@@ -7,6 +7,7 @@ import { HomePage } from './pages/HomePage'
 import { FestivalCalendarPage } from './pages/FestivalCalendarPage'
 import { LoginPage } from './pages/LoginPage'
 import { MapPage } from './pages/MapPage'
+import { MyPage } from './pages/MyPage'
 import { SignupPage } from './pages/SignupPage'
 
 function AppLayout() {
@@ -14,6 +15,7 @@ function AppLayout() {
   const isMapPage = location.pathname === '/map'
   const isHomePage = location.pathname === '/'
   const isCalendarPage = location.pathname === '/calendar'
+  const isMyPage = location.pathname === '/mypage'
   const isAuthPage = location.pathname === '/login' || location.pathname === '/signup'
 
   return (
@@ -24,7 +26,7 @@ function AppLayout() {
         <div className="landingNavShell">
           <HomeLandingHeader />
         </div>
-      ) : isHomePage || isCalendarPage ? null : (
+      ) : isHomePage || isCalendarPage || isMyPage ? null : (
         <NavBar />
       )}
       <main className="appMain">
@@ -32,6 +34,7 @@ function AppLayout() {
           <Route path="/" element={<HomePage />} />
           <Route path="/calendar" element={<FestivalCalendarPage />} />
           <Route path="/map" element={<MapPage />} />
+          <Route path="/mypage" element={<MyPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />

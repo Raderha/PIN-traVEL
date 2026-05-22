@@ -8,10 +8,11 @@ import { resolveShareableOrigin } from '../lib/shareableOrigin'
 
 export function NavBar() {
   const nav = useNavigate()
-  const token = typeof window !== 'undefined' ? localStorage.getItem('pintravel_token') : null
+  const [token, setToken] = useState(() => (typeof window !== 'undefined' ? localStorage.getItem('pintravel_token') : null))
 
   function onLogout() {
     clearPintravelClientStorage()
+    setToken(null)
     nav('/', { replace: true })
   }
 
@@ -39,6 +40,12 @@ export function NavBar() {
             </span>
             지도
           </NavLink>
+
+          {token ? (
+            <NavLink to="/mypage" className={({ isActive }) => `navItem ${isActive ? 'active' : ''}`}>
+              마이페이지
+            </NavLink>
+          ) : null}
         </div>
 
         <div className="navRight">
@@ -60,7 +67,7 @@ export function NavBar() {
 
 export function MapNavBar() {
   const nav = useNavigate()
-  const token = typeof window !== 'undefined' ? localStorage.getItem('pintravel_token') : null
+  const [token, setToken] = useState(() => (typeof window !== 'undefined' ? localStorage.getItem('pintravel_token') : null))
   const [sessionUrl, setSessionUrl] = useState<string | null>(null)
   const [creatingSession, setCreatingSession] = useState(false)
   const [sessionError, setSessionError] = useState<string | null>(null)
@@ -70,6 +77,7 @@ export function MapNavBar() {
 
   function onLogout() {
     clearPintravelClientStorage()
+    setToken(null)
     nav('/', { replace: true })
   }
 

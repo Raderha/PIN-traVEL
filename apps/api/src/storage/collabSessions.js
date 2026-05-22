@@ -10,6 +10,8 @@ export const COLLAB_SESSIONS_COLLECTION = "collab_sessions";
 const dirtyIds = new Set();
 /** sessionId → host socket.id (재접속은 게스트만, 호스트 중복 접속 차단) */
 const activeHostSocketIds = new Map();
+/** sessionId → socket.id → participant */
+const activeParticipants = new Map();
 let flushTimer = null;
 
 const FLUSH_INTERVAL_MS = Number(process.env.COLLAB_SESSION_FLUSH_MS ?? 5000);
@@ -100,6 +102,50 @@ export function registerCollabHostSocket(sessionId, socketId) {
   activeHostSocketIds.set(sessionId, socketId);
 }
 
+export function registerCollabParticipant(sessionId, socketId, participant) {
+  if (!activeParticipants.has(sessionId)) activeParticipants.set(sessionId, new Map());
+  activeParticipants.get(sessionId).set(socketId, {
+    socketId,
+    userId: participant?.userId ?? null,
+    username: participant?.username ?? "guest",
+    isHost: Boolean(participant?.isHost),
+    joinedAt: Date.now(),
+  });
+}
+
+export function unregisterCollabParticipant(sessionId, socketId) {
+  const participants = activeParticipants.get(sessionId);
+  if (!participants) return;
+  participants.delete(socketId);
+  if (participants.size === 0) activeParticipants.delete(sessionId);
+}
+
+export function getCollabParticipantSnapshot(sessionId) {
+  const participants = activeParticipants.get(sessionId);
+  if (!participants) return null;
+
+  const byUser = new Map();
+  for (const participant of participants.values()) {
+    const key = participant.userId ? `user:${participant.userId}` : `socket:${participant.socketId}`;
+    const existing = byUser.get(key);
+    if (!existing || participant.isHost) {
+      byUser.set(key, {
+        userId: participant.userId,
+        username: participant.username,
+        isHost: participant.isHost,
+        joinedAt: participant.joinedAt,
+      });
+    }
+  }
+
+  const list = [...byUser.values()];
+  return {
+    count: list.length,
+    userIds: list.map((p) => p.userId).filter(Boolean),
+    participants: list,
+  };
+}
+
 /** @returns {boolean} 이 소켓이 활성 호스트였는지 */
 export function unregisterCollabHostSocket(sessionId, socketId) {
   if (activeHostSocketIds.get(sessionId) !== socketId) return false;
@@ -111,6 +157,7 @@ export async function deleteCollabSession(id) {
   sessions.delete(id);
   dirtyIds.delete(id);
   activeHostSocketIds.delete(id);
+  activeParticipants.delete(id);
 
   await getMongoDb().collection(COLLAB_SESSIONS_COLLECTION).deleteOne({ id });
 }

@@ -4,13 +4,12 @@ export function parseWebOrigins() {
   return raw.split(",").map((s) => s.trim()).filter(Boolean);
 }
 
-const LAN_ORIGIN_RE =
-  /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3})(:\d+)?$/;
+const DEV_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1|\d{1,3}(?:\.\d{1,3}){3})(:\d+)?$/;
 
 export function isCorsOriginAllowed(origin) {
   if (!origin) return true;
   if (parseWebOrigins().includes(origin)) return true;
-  if (process.env.NODE_ENV !== "production" && LAN_ORIGIN_RE.test(origin)) return true;
+  if (process.env.NODE_ENV !== "production" && DEV_ORIGIN_RE.test(origin)) return true;
   return false;
 }
 

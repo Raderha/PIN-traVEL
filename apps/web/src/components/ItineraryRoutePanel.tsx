@@ -24,37 +24,6 @@ function formatDistanceKo(meters: number) {
   return `${Math.round(meters)} m`
 }
 
-function formatNarrativeFailureMessage(raw: string): string {
-  const trimmed = raw.trim()
-  const nl = trimmed.indexOf('\n')
-  const code = nl === -1 ? trimmed : trimmed.slice(0, nl).trim()
-  const detail = nl === -1 ? '' : trimmed.slice(nl + 1).trim()
-
-  const heads: Record<string, string> = {
-    GEMINI_QUOTA:
-      'Gemini 사용 한도(429)에 걸렸어요. Google AI Studio에서 할당량·결제를 확인하거나, 잠시 후 다시 시도해 주세요.',
-    GEMINI_FAILED: 'Gemini가 일정 문구를 만들지 못했어요.',
-    GEMINI_MODEL_NOT_FOUND:
-      '설정한 Gemini 모델 이름을 API에서 찾지 못했어요. apps/api/.env의 GEMINI_MODEL을 확인해 주세요.',
-    INVALID_BODY: '서버가 요청 본문을 이해하지 못했어요.',
-    ROUTE_NARRATIVE_INVALID: '서버 응답 형식이 올바르지 않아요.',
-    GEMINI_NOT_CONFIGURED: '',
-    NETWORK_OR_FETCH: '브라우저에서 API 서버로 연결하지 못했어요.',
-    INVALID_JSON_RESPONSE: '서버 응답이 JSON이 아니에요.',
-    HTTP_404: '요청한 API 경로를 찾을 수 없어요. 웹은 `npm run dev`(Vite 프록시) 또는 API와 같은 출처로 열어 주세요.',
-  }
-
-  if (code === 'HTTP_502' && !detail) {
-    return '서버(Gemini 호출) 오류(502)예요. API 터미널 로그의 [itinerary/schedule-narrative]를 확인해 주세요.'
-  }
-
-  const head = heads[code] ?? `오류 코드: ${code}`
-  if (!head && code === 'GEMINI_NOT_CONFIGURED') return ''
-  if (detail) return `${head}\n\n${detail}`
-  if (head) return `${head}\n\n(추가 메시지 없음 — API 서버 콘솔 로그를 확인해 주세요.)`
-  return trimmed
-}
-
 function tripCalendarDateForDay(tripStartIso: string, dayIndex: number): string {
   const m = String(tripStartIso).trim().match(/^(\d{4})-(\d{2})-(\d{2})/)
   if (!m) return tripStartIso
@@ -88,7 +57,7 @@ function buildItineraryDownloadHtml(
   dayIndices: number[],
   cartDays: SummaryPin[][],
   tripHotelId: string | null,
-  ai: ItineraryDownloadAiState,
+  _ai: ItineraryDownloadAiState,
 ): string {
   const maxD = dayIndices.length ? maxStopDayIndex(dayIndices) : 0
 

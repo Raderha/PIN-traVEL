@@ -19,13 +19,27 @@ async function ensureIndexes() {
   await db.collection("users").createIndex({ username: 1 }, { unique: true, name: "users_username_unique" });
 }
 
+function signupDuplicateError(err) {
+  const keyPattern = err?.keyPattern && typeof err.keyPattern === "object" ? err.keyPattern : {};
+  const keyValue = err?.keyValue && typeof err.keyValue === "object" ? err.keyValue : {};
+  const message = String(err?.message ?? "");
+
+  if (keyPattern.username || keyValue.username || message.includes("users_username_unique") || message.includes("username_1")) {
+    return "USERNAME_TAKEN";
+  }
+  if (keyPattern.email || keyValue.email || message.includes("email_1")) {
+    return "EMAIL_TAKEN";
+  }
+  return "DUPLICATE_KEY";
+}
+
 // UC2: 회원가입
 authRouter.post("/signup", async (req, res) => {
   const body = z
     .object({
-      username: z.string().min(3).max(30),
+      username: z.string().trim().min(3).max(30),
       password: z.string().min(8).max(128),
-      email: z.string().email().max(254),
+      email: z.string().trim().email().max(254),
     })
     .safeParse(req.body);
 
@@ -52,7 +66,7 @@ authRouter.post("/signup", async (req, res) => {
   } catch (err) {
     // Mongo duplicate key error
     if (err && (err.code === 11000 || String(err.message ?? "").includes("E11000"))) {
-      return res.status(409).json({ ok: false, error: "USERNAME_TAKEN" });
+      return res.status(409).json({ ok: false, error: signupDuplicateError(err) });
     }
     console.error("[auth] signup failed:", err);
     return res.status(500).json({ ok: false, error: "INTERNAL_ERROR" });
@@ -63,7 +77,7 @@ authRouter.post("/signup", async (req, res) => {
 authRouter.post("/login", async (req, res) => {
   const body = z
     .object({
-      username: z.string().min(1),
+      username: z.string().trim().min(1),
       password: z.string().min(1),
     })
     .safeParse(req.body);

@@ -115,7 +115,16 @@ async function postJson<T>(path: string, body: unknown, signal?: AbortSignal): P
     signal,
     credentials: 'include',
   })
-  if (!res.ok) throw new Error(`HTTP_${res.status}`)
+  if (!res.ok) {
+    let message = `HTTP_${res.status}`
+    try {
+      const json = (await res.json()) as { error?: unknown }
+      if (typeof json.error === 'string' && json.error.trim()) message = json.error
+    } catch {
+      // Keep the HTTP status fallback when the response is not JSON.
+    }
+    throw new Error(message)
+  }
   return (await res.json()) as T
 }
 
@@ -329,6 +338,7 @@ export type ScheduleRoutePersist = {
 export type PostScheduleConfirmBody = {
   /** 여행 지역 코드(예: busan) */
   region?: string
+  collabSessionId?: string | null
   tripStartDate: string
   /** 출발지 검색/입력 문구(최상위 한 곳만) */
   departure: string
@@ -337,6 +347,45 @@ export type PostScheduleConfirmBody = {
 } & ScheduleRoutePersist
 
 export type PostScheduleConfirmResponse = { ok: true; scheduleId: string }
+
+export type MyScheduleHistoryItem = {
+  id: string
+  travelId: string
+  tripStartDate: string
+  tripEndDate: string
+  departure: string
+  mainStops: string[]
+  visitDays: Array<{
+    dayIndex: number
+    date: string
+    stops: Array<{ title: string }>
+  }>
+  participantCount: number
+  participantUserIds: string[]
+  createdAt: string
+}
+
+export type MySchedulesResponse = {
+  ok: true
+  schedules: MyScheduleHistoryItem[]
+}
+
+export async function fetchMySchedules(signal?: AbortSignal): Promise<MySchedulesResponse> {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('pintravel_token') : null
+  if (!token) throw new Error('UNAUTHORIZED')
+
+  const res = await fetch('/api/schedule/my', {
+    headers: { authorization: `Bearer ${token}` },
+    signal,
+    credentials: 'include',
+  })
+  if (res.status === 401) throw new Error('UNAUTHORIZED')
+  const data = (await res.json()) as { ok?: boolean; schedules?: MyScheduleHistoryItem[]; error?: string }
+  if (!res.ok || !data.ok || !Array.isArray(data.schedules)) {
+    throw new Error(typeof data.error === 'string' ? data.error : `HTTP_${res.status}`)
+  }
+  return { ok: true, schedules: data.schedules }
+}
 
 /** 확정 일정을 서버 `schedule` 컬렉션에 저장 (Bearer 토큰 필요) */
 export async function postScheduleConfirm(body: PostScheduleConfirmBody, signal?: AbortSignal): Promise<PostScheduleConfirmResponse> {
@@ -351,6 +400,7 @@ export async function postScheduleConfirm(body: PostScheduleConfirmBody, signal?
     },
     body: JSON.stringify({
       region: body.region ?? 'busan',
+      collabSessionId: body.collabSessionId ?? null,
       tripStartDate: body.tripStartDate,
       departure: body.departure,
       tripHotelId: body.tripHotelId ?? null,

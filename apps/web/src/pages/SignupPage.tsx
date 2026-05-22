@@ -59,7 +59,16 @@ export function SignupPage() {
       await signup({ username: u, password, email: em })
       nav('/login', { replace: true })
     } catch (e2) {
-      setError('회원가입에 실패했어요. (이미 사용 중인 아이디입니다)')
+      const code = e2 instanceof Error ? e2.message : ''
+      if (code === 'USERNAME_TAKEN') {
+        setError('이미 사용 중인 아이디입니다.')
+      } else if (code === 'EMAIL_TAKEN') {
+        setError('이미 사용 중인 이메일입니다.')
+      } else if (code === 'INVALID_INPUT') {
+        setError('아이디, 비밀번호, 이메일 형식을 다시 확인해 주세요.')
+      } else {
+        setError('회원가입에 실패했어요. 잠시 후 다시 시도해 주세요.')
+      }
     } finally {
       setSubmitting(false)
     }

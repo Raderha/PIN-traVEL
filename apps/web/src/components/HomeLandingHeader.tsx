@@ -1,13 +1,15 @@
+import { useState } from 'react'
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 
 import { clearPintravelClientStorage } from '../lib/clearPintravelStorage'
 
 export function HomeLandingHeader() {
   const nav = useNavigate()
-  const token = typeof window !== 'undefined' ? localStorage.getItem('pintravel_token') : null
+  const [token, setToken] = useState(() => (typeof window !== 'undefined' ? localStorage.getItem('pintravel_token') : null))
 
   function onLogout() {
     clearPintravelClientStorage()
+    setToken(null)
     nav('/', { replace: true })
   }
 
@@ -27,6 +29,11 @@ export function HomeLandingHeader() {
         <NavLink className="homeLandingNavItem" to="/map">
           지도
         </NavLink>
+        {token ? (
+          <NavLink className="homeLandingNavItem" to="/mypage">
+            마이페이지
+          </NavLink>
+        ) : null}
       </nav>
 
       {token ? (

@@ -406,7 +406,7 @@ export function useCollabSession({
         const code = err instanceof Error ? err.message : ''
         if (code === 'NOT_FOUND') {
           const uid = userIdRef.current
-          const wasHost = Boolean(uid && host)
+          const wasHost = Boolean(uid && isHostRef.current)
           setSessionError(
             wasHost
               ? '세션을 찾을 수 없어요. 새 협업 세션을 만들어 주세요.'

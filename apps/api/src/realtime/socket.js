@@ -9,7 +9,9 @@ import {
   getCollabSessionCached,
   isCollabHostOnline,
   markCollabSessionDirty,
+  registerCollabParticipant,
   registerCollabHostSocket,
+  unregisterCollabParticipant,
   unregisterCollabHostSocket,
 } from "../storage/collabSessions.js";
 import { corsOriginCallback } from "../security/corsOrigins.js";
@@ -54,6 +56,11 @@ export function attachSocketServer(httpServer) {
       socket.data.username = username ?? "guest";
       socket.data.userId = userId ?? null;
       socket.data.isSessionHost = isHost;
+      registerCollabParticipant(sessionId, socket.id, {
+        userId: socket.data.userId,
+        username: socket.data.username,
+        isHost,
+      });
 
       socket.emit("session:state", { sessionId, state: s.state ?? null });
       socket.to(sessionId).emit("session:member-joined", { username: socket.data.username });
@@ -123,6 +130,7 @@ export function attachSocketServer(httpServer) {
       if (!sessionId) return;
 
       socket.to(sessionId).emit("session:member-left", { username: socket.data.username });
+      unregisterCollabParticipant(sessionId, socket.id);
 
       if (socket.data.isSessionHost && unregisterCollabHostSocket(sessionId, socket.id)) {
         try {

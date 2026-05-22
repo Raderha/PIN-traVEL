@@ -7,6 +7,7 @@ import { z } from "zod";
 
 import { getMongoDb } from "../../storage/mongo.js";
 import { requireAuth } from "../../security/auth.js";
+import { getCollabParticipantSnapshot } from "../../storage/collabSessions.js";
 
 export const scheduleRouter = Router();
 
@@ -36,6 +37,7 @@ const legCompactSchema = z.object({
 
 const confirmBodySchema = z.object({
   region: z.string().min(1).max(64).optional(),
+  collabSessionId: z.string().min(1).max(120).nullable().optional(),
   tripStartDate: z.string().min(1).max(64),
   departure: z.string().min(1).max(300),
   tripHotelId: z.string().max(240).nullable().optional(),
@@ -52,6 +54,66 @@ const confirmBodySchema = z.object({
   legs: z.array(legCompactSchema).max(60),
 });
 
+function scheduleHistoryItem(doc) {
+  const visitDays = Array.isArray(doc.visitDays) ? doc.visitDays : [];
+  const dates = visitDays.map((d) => d?.date).filter((d) => typeof d === "string" && d);
+  const stops = visitDays.flatMap((d) => (Array.isArray(d?.stops) ? d.stops : []));
+  const stopTitles = stops.map((s) => s?.title).filter((title) => typeof title === "string" && title.trim());
+
+  return {
+    id: String(doc._id),
+    travelId: `#CM${String(doc._id).slice(-4).toUpperCase()}`,
+    tripStartDate: doc.tripStartDate,
+    tripEndDate: dates.length ? dates[dates.length - 1] : doc.tripStartDate,
+    departure: doc.departure,
+    mainStops: stopTitles.slice(0, 4),
+    visitDays: visitDays.map((day, index) => ({
+      dayIndex: Number.isInteger(day?.dayIndex) ? day.dayIndex : index,
+      date: typeof day?.date === "string" ? day.date : "",
+      stops: Array.isArray(day?.stops)
+        ? day.stops
+            .map((stop) => ({
+              title: typeof stop?.title === "string" ? stop.title : "",
+            }))
+            .filter((stop) => stop.title.trim())
+        : [],
+    })),
+    participantCount: Number(doc.participantCount) || 1,
+    participantUserIds: Array.isArray(doc.participantUserIds) ? doc.participantUserIds : [doc.userId].filter(Boolean),
+    createdAt: doc.createdAt,
+  };
+}
+
+scheduleRouter.get("/my", requireAuth, async (req, res) => {
+  try {
+    const db = getMongoDb();
+    const schedules = await db
+      .collection("schedule")
+      .find(
+        { userId: req.user.userId },
+        {
+          projection: {
+            userId: 1,
+            tripStartDate: 1,
+            departure: 1,
+            visitDays: 1,
+            participantCount: 1,
+            participantUserIds: 1,
+            createdAt: 1,
+          },
+        },
+      )
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .toArray();
+
+    return res.json({ ok: true, schedules: schedules.map(scheduleHistoryItem) });
+  } catch (err) {
+    console.error("[schedule/my]", err);
+    return res.status(500).json({ ok: false, error: "INTERNAL_ERROR" });
+  }
+});
+
 scheduleRouter.post("/confirm", requireAuth, async (req, res) => {
   const parsed = confirmBodySchema.safeParse(req.body);
   if (!parsed.success) {
@@ -59,9 +121,19 @@ scheduleRouter.post("/confirm", requireAuth, async (req, res) => {
   }
 
   const now = new Date();
+  const collabSessionId = parsed.data.collabSessionId ?? null;
+  const participantSnapshot = collabSessionId ? getCollabParticipantSnapshot(collabSessionId) : null;
+  const participants = participantSnapshot?.participants?.length
+    ? participantSnapshot.participants
+    : [{ userId: req.user.userId, username: req.user.username, isHost: true, joinedAt: now.getTime() }];
+
   const doc = {
     userId: req.user.userId,
     username: req.user.username,
+    collabSessionId,
+    participantCount: participantSnapshot?.count ?? 1,
+    participantUserIds: participantSnapshot?.userIds?.length ? participantSnapshot.userIds : [req.user.userId],
+    participants,
     region: parsed.data.region ?? "busan",
     tripStartDate: parsed.data.tripStartDate,
     departure: parsed.data.departure,
