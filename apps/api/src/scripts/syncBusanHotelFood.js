@@ -2,8 +2,8 @@
  * 부산 숙소/식당 TourAPI 데이터를 MongoDB 컬렉션에 적재하는 스크립트.
  *
  * 출력 컬렉션:
- * - hotel: 부산 숙소(contentTypeId=32)
- * - food: 부산 식당(contentTypeId=39)
+ * - busan_hotel: 부산 숙소(contentTypeId=32)
+ * - busan_food: 부산 식당(contentTypeId=39)
  *
  * 실행:
  * - npm run sync:busan:hotel-food -w @pintravel/api
@@ -26,8 +26,8 @@ const MOBILE_APP = "pintravel";
 const NUM_OF_ROWS = 10;
 
 const TARGETS = [
-  { collectionName: "hotel", label: "부산 숙소", contentTypeId: "32" },
-  { collectionName: "food", label: "부산 식당", contentTypeId: "39" },
+  { collectionName: "busan_hotel", label: "부산 숙소", contentTypeId: "32" },
+  { collectionName: "busan_food", label: "부산 식당", contentTypeId: "39" },
 ];
 
 function requireEnv(name) {

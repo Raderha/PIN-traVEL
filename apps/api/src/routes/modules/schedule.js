@@ -11,6 +11,11 @@ import { getCollabParticipantSnapshot } from "../../storage/collabSessions.js";
 
 export const scheduleRouter = Router();
 
+function devLog(event, payload) {
+  if (process.env.NODE_ENV === "production") return;
+  console.log(`[dev:${event}]`, payload);
+}
+
 const visitPinSchema = z.object({
   id: z.string().max(240),
   title: z.string().max(400),
@@ -107,6 +112,7 @@ scheduleRouter.get("/my", requireAuth, async (req, res) => {
       .limit(50)
       .toArray();
 
+    devLog("schedule.my.result", { ok: true, userId: req.user.userId, count: schedules.length });
     return res.json({ ok: true, schedules: schedules.map(scheduleHistoryItem) });
   } catch (err) {
     console.error("[schedule/my]", err);
@@ -117,6 +123,7 @@ scheduleRouter.get("/my", requireAuth, async (req, res) => {
 scheduleRouter.post("/confirm", requireAuth, async (req, res) => {
   const parsed = confirmBodySchema.safeParse(req.body);
   if (!parsed.success) {
+    devLog("schedule.confirm", { ok: false, userId: req.user.userId, error: "INVALID_BODY", issues: parsed.error.issues.map((i) => i.path.join(".")) });
     return res.status(400).json({ ok: false, error: "INVALID_BODY" });
   }
 
@@ -146,10 +153,29 @@ scheduleRouter.post("/confirm", requireAuth, async (req, res) => {
     createdAt: now,
     updatedAt: now,
   };
+  devLog("schedule.confirm.request", {
+    userId: req.user.userId,
+    username: req.user.username,
+    collabSessionId,
+    participantCount: doc.participantCount,
+    tripStartDate: doc.tripStartDate,
+    departure: doc.departure,
+    tripHotelId: doc.tripHotelId,
+    visitDayCount: doc.visitDays.length,
+    stopsByDay: doc.visitDays.map((day) => ({
+      dayIndex: day.dayIndex,
+      date: day.date,
+      stopCount: day.stops.length,
+      titles: day.stops.map((s) => s.title),
+    })),
+    totals: doc.totals,
+    legCount: doc.legs.length,
+  });
 
   try {
     const db = getMongoDb();
     const r = await db.collection("schedule").insertOne(doc);
+    devLog("schedule.confirm.result", { ok: true, scheduleId: String(r.insertedId), userId: req.user.userId });
     return res.json({ ok: true, scheduleId: String(r.insertedId) });
   } catch (err) {
     console.error("[schedule/confirm]", err);

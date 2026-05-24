@@ -16,6 +16,11 @@ import {
 } from "../storage/collabSessions.js";
 import { corsOriginCallback } from "../security/corsOrigins.js";
 
+function devLog(event, payload) {
+  if (process.env.NODE_ENV === "production") return;
+  console.log(`[dev:${event}]`, payload);
+}
+
 function isSessionHostSocket(socket, sessionId) {
   if (socket.data.isSessionHost) return true;
   const s = getCollabSessionCached(sessionId);
@@ -61,6 +66,13 @@ export function attachSocketServer(httpServer) {
         username: socket.data.username,
         isHost,
       });
+      devLog("socket.session.join", {
+        sessionId,
+        socketId: socket.id,
+        userId: socket.data.userId,
+        username: socket.data.username,
+        isHost,
+      });
 
       socket.emit("session:state", { sessionId, state: s.state ?? null });
       socket.to(sessionId).emit("session:member-joined", { username: socket.data.username });
@@ -84,6 +96,7 @@ export function attachSocketServer(httpServer) {
         s.state.map = { center, zoom };
         markCollabSessionDirty(sessionId);
       }
+      devLog("socket.session.map", { sessionId, socketId: socket.id, center, zoom });
       socket.to(sessionId).emit("session:map", { center, zoom });
     });
 
@@ -97,6 +110,12 @@ export function attachSocketServer(httpServer) {
         s.state.itinerary = itinerary;
         markCollabSessionDirty(sessionId);
       }
+      devLog("socket.session.itinerary", {
+        sessionId,
+        socketId: socket.id,
+        hasItinerary: Boolean(itinerary),
+        stopCount: Array.isArray(itinerary?.route?.stops) ? itinerary.route.stops.length : 0,
+      });
       socket.to(sessionId).emit("session:itinerary", itinerary);
     });
 
@@ -114,6 +133,13 @@ export function attachSocketServer(httpServer) {
         s.state.cart = cart;
         markCollabSessionDirty(sessionId);
       }
+      devLog("socket.session.cart", {
+        sessionId,
+        socketId: socket.id,
+        dayCount: cartDays.length,
+        stopCount: cartDays.reduce((sum, day) => sum + (Array.isArray(day) ? day.length : 0), 0),
+        tripHotelId,
+      });
       socket.to(sessionId).emit("session:cart", cart);
     });
 
@@ -131,6 +157,13 @@ export function attachSocketServer(httpServer) {
 
       socket.to(sessionId).emit("session:member-left", { username: socket.data.username });
       unregisterCollabParticipant(sessionId, socket.id);
+      devLog("socket.session.leave", {
+        sessionId,
+        socketId: socket.id,
+        userId: socket.data.userId,
+        username: socket.data.username,
+        isHost: Boolean(socket.data.isSessionHost),
+      });
 
       if (socket.data.isSessionHost && unregisterCollabHostSocket(sessionId, socket.id)) {
         try {

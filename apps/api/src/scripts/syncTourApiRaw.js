@@ -4,8 +4,8 @@
  * 저장 컬렉션(요구사항):
  * - festivals_raw: 축제 목록 원본
  * - festival_details_raw: 축제 상세 원본(detailCommon2 + detailIntro2)
- * - places_raw: 관광지 목록 원본
- * - place_details_raw: 관광지 상세 원본(detailCommon2 + detailIntro2)
+ * - busan_places_raw: 관광지 목록 원본
+ * - busan_place_details_raw: 관광지 상세 원본(detailCommon2 + detailIntro2)
  *
  * 실행:
  * - node src/scripts/syncTourApiRaw.js
@@ -317,8 +317,8 @@ async function main() {
 
   const festivalsRaw = db.collection("festivals_raw");
   const festivalDetailsRaw = db.collection("festival_details_raw");
-  const placesRaw = db.collection("places_raw");
-  const placeDetailsRaw = db.collection("place_details_raw");
+  const placesRaw = db.collection("busan_places_raw");
+  const placeDetailsRaw = db.collection("busan_place_details_raw");
 
   await Promise.all([
     festivalsRaw.createIndex({ kind: 1, contentId: 1 }, { unique: true }),

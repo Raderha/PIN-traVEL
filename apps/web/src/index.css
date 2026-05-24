@@ -1085,17 +1085,17 @@ button.homeLandingCta {
 }
 
 .summaryPinMarker {
-  width: 226px;
-  height: 125px;
+  width: 192px;
+  height: 106px;
   display: flex;
   align-items: center;
-  gap: 11px;
+  gap: 8px;
   box-sizing: border-box;
-  padding: 25px 27px 41px 32px;
+  padding: 20px 21px 34px 27px;
   background-repeat: no-repeat;
-  background-position: center -78px;
-  background-size: 285px 285px;
-  color: #ffffff;
+  background-position: center -66px;
+  background-size: 242px 242px;
+  color: #111827;
   font-family: var(--sans);
   line-height: 1.12;
   filter: drop-shadow(0 6px 10px rgba(15, 23, 42, 0.18));

@@ -11,6 +11,11 @@ import { hashPassword, verifyPassword } from "../../security/passwords.js";
 
 export const authRouter = Router();
 
+function devLog(event, payload) {
+  if (process.env.NODE_ENV === "production") return;
+  console.log(`[dev:${event}]`, payload);
+}
+
 let ensured = false;
 async function ensureIndexes() {
   if (ensured) return;
@@ -43,7 +48,10 @@ authRouter.post("/signup", async (req, res) => {
     })
     .safeParse(req.body);
 
-  if (!body.success) return res.status(400).json({ ok: false, error: "INVALID_INPUT" });
+  if (!body.success) {
+    devLog("auth.signup", { ok: false, error: "INVALID_INPUT", issues: body.error.issues.map((i) => i.path.join(".")) });
+    return res.status(400).json({ ok: false, error: "INVALID_INPUT" });
+  }
 
   try {
     await ensureIndexes();
@@ -51,6 +59,11 @@ authRouter.post("/signup", async (req, res) => {
     const col = db.collection("users");
 
     const { username, password, email } = body.data;
+    devLog("auth.signup.request", {
+      username,
+      email,
+      passwordLength: password.length,
+    });
     const passwordScrypt = hashPassword(password);
 
     const now = new Date();
@@ -62,11 +75,14 @@ authRouter.post("/signup", async (req, res) => {
       updatedAt: now,
     });
 
+    devLog("auth.signup.result", { ok: true, userId: String(r.insertedId), username, email });
     return res.json({ ok: true, user: { id: String(r.insertedId), username, email } });
   } catch (err) {
     // Mongo duplicate key error
     if (err && (err.code === 11000 || String(err.message ?? "").includes("E11000"))) {
-      return res.status(409).json({ ok: false, error: signupDuplicateError(err) });
+      const error = signupDuplicateError(err);
+      devLog("auth.signup.result", { ok: false, error });
+      return res.status(409).json({ ok: false, error });
     }
     console.error("[auth] signup failed:", err);
     return res.status(500).json({ ok: false, error: "INTERNAL_ERROR" });
@@ -82,7 +98,10 @@ authRouter.post("/login", async (req, res) => {
     })
     .safeParse(req.body);
 
-  if (!body.success) return res.status(400).json({ ok: false, error: "INVALID_INPUT" });
+  if (!body.success) {
+    devLog("auth.login", { ok: false, error: "INVALID_INPUT", issues: body.error.issues.map((i) => i.path.join(".")) });
+    return res.status(400).json({ ok: false, error: "INVALID_INPUT" });
+  }
 
   try {
     await ensureIndexes();
@@ -90,14 +109,17 @@ authRouter.post("/login", async (req, res) => {
     const col = db.collection("users");
 
     const { username, password } = body.data;
+    devLog("auth.login.request", { username, passwordLength: password.length });
     const user = await col.findOne({ username }, { projection: { username: 1, email: 1, password: 1 } });
     if (!user || !verifyPassword(password, user.password)) {
+      devLog("auth.login.result", { ok: false, username, userFound: Boolean(user), error: "INVALID_CREDENTIALS" });
       return res
         .status(401)
         .json({ ok: false, error: "INVALID_CREDENTIALS", message: "아이디 또는 비밀번호가 올바르지 않습니다." });
     }
 
     const token = signToken({ userId: String(user._id), username: user.username });
+    devLog("auth.login.result", { ok: true, userId: String(user._id), username: user.username });
     return res.json({ ok: true, token, user: { id: String(user._id), username: user.username, email: user.email ?? null } });
   } catch (err) {
     console.error("[auth] login failed:", err);

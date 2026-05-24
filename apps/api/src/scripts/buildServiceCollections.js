@@ -11,18 +11,18 @@
 
  * 
  * 입력:
- * - places_raw (문서 예: { kind, contentId, raw, fetchedAt, ... })
- * - place_details_raw (문서 예: { kind, contentId, commonRaw, introRaw, ... })
+ * - busan_places_raw (문서 예: { kind, contentId, raw, fetchedAt, ... })
+ * - busan_place_details_raw (문서 예: { kind, contentId, commonRaw, introRaw, ... })
  * - festivals_raw
  * - festival_details_raw
  *
  * 출력(서비스용):
- * - places
+ * - busan_places
  * - festivals
  *
  * 실행:
  * - node src/scripts/buildServiceCollections.js
- * - node src/scripts/buildServiceCollections.js --drop   (기존 places/festivals 컬렉션 drop 후 재생성)
+ * - node src/scripts/buildServiceCollections.js --drop   (기존 busan_places/festivals 컬렉션 drop 후 재생성)
  *
  * 필요 환경변수:
  * - MONGODB_URI (예: mongodb://127.0.0.1:27017/pintravel)
@@ -200,9 +200,9 @@ function festivalDoc({ listRaw, commonRaw, introRaw }) {
 }
 
 async function ensureIndexes(db) {
-  await db.collection("places").createIndex({ contentId: 1 }, { unique: true, name: "uniq_contentId" });
-  await db.collection("places").createIndex({ location: "2dsphere" }, { name: "geo_location" });
-  await db.collection("places").createIndex({ idongCode: 1 }, { name: "idx_idongCode" });
+  await db.collection("busan_places").createIndex({ contentId: 1 }, { unique: true, name: "uniq_contentId" });
+  await db.collection("busan_places").createIndex({ location: "2dsphere" }, { name: "geo_location" });
+  await db.collection("busan_places").createIndex({ idongCode: 1 }, { name: "idx_idongCode" });
 
   await db.collection("festivals").createIndex({ contentId: 1 }, { unique: true, name: "uniq_contentId" });
   await db.collection("festivals").createIndex({ location: "2dsphere" }, { name: "geo_location" });
@@ -211,9 +211,9 @@ async function ensureIndexes(db) {
 }
 
 async function rebuildPlaces(db) {
-  const placesRawCol = db.collection("places_raw");
-  const placeDetailsCol = db.collection("place_details_raw");
-  const placesCol = db.collection("places");
+  const placesRawCol = db.collection("busan_places_raw");
+  const placeDetailsCol = db.collection("busan_place_details_raw");
+  const placesCol = db.collection("busan_places");
 
   const cursor = placesRawCol.find(
     {
@@ -319,7 +319,7 @@ async function main() {
   if (shouldDrop) {
     const existing = await db.listCollections({}, { nameOnly: true }).toArray();
     const names = new Set(existing.map((c) => c.name));
-    if (names.has("places")) await db.collection("places").drop();
+    if (names.has("busan_places")) await db.collection("busan_places").drop();
     if (names.has("festivals")) await db.collection("festivals").drop();
   }
 

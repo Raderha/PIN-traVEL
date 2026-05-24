@@ -782,7 +782,6 @@ export function MapPage() {
       {
         kind: 'all',
         region: 'busan',
-        limit: 100,
         ...(festivalFilterEnabled ? filterRange : {}),
       },
       ac.signal,
@@ -1322,8 +1321,8 @@ export function MapPage() {
             map: mapInstance,
             icon: {
               content: createSummaryPinContent(pin),
-              size: new maps.Size(226, 125),
-              anchor: new maps.Point(113, 125),
+              size: new maps.Size(192, 106),
+              anchor: new maps.Point(96, 106),
             },
           })
           markersRef.current.push(marker)
@@ -1343,8 +1342,8 @@ export function MapPage() {
               map: mapInstance,
               icon: {
                 content: createSummaryPinContent(pin),
-                size: new maps.Size(226, 125),
-                anchor: new maps.Point(113, 125),
+                size: new maps.Size(192, 106),
+                anchor: new maps.Point(96, 106),
               },
             })
             markersRef.current.push(marker)
@@ -1374,8 +1373,8 @@ export function MapPage() {
           map: mapInstance,
           icon: {
             content: createSummaryPinContent(pin),
-            size: new maps.Size(226, 125),
-            anchor: new maps.Point(113, 125),
+            size: new maps.Size(192, 106),
+            anchor: new maps.Point(96, 106),
           },
         })
         markersRef.current.push(marker)

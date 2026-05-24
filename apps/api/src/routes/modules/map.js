@@ -20,6 +20,11 @@ import { getMongoDb } from "../../storage/mongo.js";
 
 export const mapRouter = Router();
 
+function devLog(event, payload) {
+  if (process.env.NODE_ENV === "production") return;
+  console.log(`[dev:${event}]`, payload);
+}
+
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "YYYY-MM-DD");
 
 function collection(name) {
@@ -119,24 +124,28 @@ mapRouter.get("/summary-pins", async (req, res) => {
       date: isoDate.optional(),
       from: isoDate.optional(),
       to: isoDate.optional(),
-      limit: z.coerce.number().int().min(1).max(100).optional(),
+      limit: z.coerce.number().int().min(1).max(5000).optional(),
     })
     .safeParse(req.query);
-  if (!parsed.success) return res.status(400).json({ ok: false, error: "INVALID_QUERY" });
+  if (!parsed.success) {
+    devLog("map.summary-pins", { ok: false, error: "INVALID_QUERY", query: req.query });
+    return res.status(400).json({ ok: false, error: "INVALID_QUERY" });
+  }
 
   const kind = parsed.data.kind ?? "all";
   const region = parsed.data.region ?? "busan";
   const date = parsed.data.date ?? null;
   const rangeFrom = parsed.data.from ?? null;
   const rangeTo = parsed.data.to ?? null;
-  const limit = parsed.data.limit ?? 40;
+  const limit = parsed.data.limit ?? null;
   const regionQuery = regionQueryForRegion(region);
   if (!regionQuery) return res.status(400).json({ ok: false, error: "UNSUPPORTED_REGION" });
 
   const pins = [];
+  let festivalCount = 0;
+  let tourCount = 0;
 
   if (kind === "all" || kind === "festival") {
-    const festivalLimit = kind === "all" ? Math.ceil(limit / 2) : limit;
     const dateQuery = date
       ? { startDate: { $lte: date }, endDate: { $gte: date } }
       : rangeFrom && rangeTo
@@ -169,15 +178,17 @@ mapRouter.get("/summary-pins", async (req, res) => {
         }
       )
       .sort({ endDate: 1, startDate: 1, title: 1 })
-      .limit(festivalLimit)
+      .limit(limit == null ? 0 : kind === "all" ? Math.ceil(limit / 2) : limit)
       .toArray();
-    pins.push(...festivals.map(festivalSummaryPin).filter(Boolean));
+    const festivalPins = festivals.map(festivalSummaryPin).filter(Boolean);
+    festivalCount = festivalPins.length;
+    pins.push(...festivalPins);
   }
 
   if (kind === "all" || kind === "tour") {
-    const remaining = Math.max(limit - pins.length, 0);
-    if (remaining > 0) {
-      const places = await collection("places")
+    const remaining = limit == null ? null : Math.max(limit - pins.length, 0);
+    if (remaining == null || remaining > 0) {
+      const places = await collection("busan_places")
         .find(
           regionQuery,
           {
@@ -203,11 +214,35 @@ mapRouter.get("/summary-pins", async (req, res) => {
           }
         )
         .sort({ title: 1 })
-        .limit(remaining)
+        .limit(remaining ?? 0)
         .toArray();
-      pins.push(...places.map(placeSummaryPin).filter(Boolean));
+      const placePins = places.map(placeSummaryPin).filter(Boolean);
+      tourCount = placePins.length;
+      pins.push(...placePins);
     }
   }
 
+  devLog("map.summary-pins.result", {
+    ok: true,
+    request: { kind, region, date, from: rangeFrom, to: rangeTo, limit },
+    sourceCollections: ["festivals", "busan_places"],
+    returned: { total: pins.length, festivals: festivalCount, tours: tourCount },
+    pinFields: [
+      "id",
+      "contentId",
+      "contentTypeId",
+      "kind",
+      "iconType",
+      "title",
+      "subtitle",
+      "address",
+      "image/images",
+      "tel/infoCenter",
+      "overview",
+      "detail",
+      "summary",
+      "location",
+    ],
+  });
   return res.json({ ok: true, region, date, from: rangeFrom, to: rangeTo, pins });
 });

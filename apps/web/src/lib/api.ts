@@ -163,8 +163,8 @@ export function fetchMapSummaryPins(
   const qs = new URLSearchParams({
     kind: params.kind ?? 'all',
     region: params.region ?? 'busan',
-    limit: String(params.limit ?? 40),
   })
+  if (params.limit != null) qs.set('limit', String(params.limit))
   if (params.date) qs.set('date', params.date)
   if (params.from) qs.set('from', params.from)
   if (params.to) qs.set('to', params.to)

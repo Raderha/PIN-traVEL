@@ -2,7 +2,7 @@
  * 역할: 선택한 장소 주변의 식당/숙소 추천 API 제공
  *
  * 마운트 경로: /api/airecommand
- * 데이터 소스: syncBusanHotelFood.js가 생성한 food, hotel 컬렉션
+ * 데이터 소스: syncBusanHotelFood.js가 생성한 busan_food, busan_hotel 컬렉션
  */
 import { Router } from "express";
 import { z } from "zod";
@@ -10,6 +10,11 @@ import { z } from "zod";
 import { getMongoDb } from "../../storage/mongo.js";
 
 export const airecommandRouter = Router();
+
+function devLog(event, payload) {
+  if (process.env.NODE_ENV === "production") return;
+  console.log(`[dev:${event}]`, payload);
+}
 
 const nearbyQuerySchema = z.object({
   lat: z.coerce.number().min(-90).max(90),
@@ -91,17 +96,27 @@ async function findNearby({ collectionName, lat, lng, limit }) {
 
 airecommandRouter.get("/nearby", async (req, res) => {
   const parsed = nearbyQuerySchema.safeParse(req.query);
-  if (!parsed.success) return res.status(400).json({ ok: false, error: "INVALID_QUERY" });
+  if (!parsed.success) {
+    devLog("airecommend.nearby", { ok: false, error: "INVALID_QUERY", query: req.query });
+    return res.status(400).json({ ok: false, error: "INVALID_QUERY" });
+  }
 
   const { lat, lng } = parsed.data;
   const limit = parsed.data.limit ?? 3;
 
   try {
     const [food, hotel] = await Promise.all([
-      findNearby({ collectionName: "food", lat, lng, limit }),
-      findNearby({ collectionName: "hotel", lat, lng, limit }),
+      findNearby({ collectionName: "busan_food", lat, lng, limit }),
+      findNearby({ collectionName: "busan_hotel", lat, lng, limit }),
     ]);
 
+    devLog("airecommend.nearby.result", {
+      ok: true,
+      origin: { lat, lng },
+      limit,
+      food: { radiusKm: food.radiusKm, count: food.items.length, titles: food.items.map((i) => i.title) },
+      hotel: { radiusKm: hotel.radiusKm, count: hotel.items.length, titles: hotel.items.map((i) => i.title) },
+    });
     return res.json({
       ok: true,
       origin: { lat, lng },

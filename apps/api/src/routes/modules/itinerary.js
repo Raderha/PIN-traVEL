@@ -14,6 +14,11 @@ import { buildItineraryDrivingRoute } from "../../services/naverMapsRoute.js";
 
 export const itineraryRouter = Router();
 
+function devLog(event, payload) {
+  if (process.env.NODE_ENV === "production") return;
+  console.log(`[dev:${event}]`, payload);
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const stopSchema = z.object({
@@ -176,6 +181,7 @@ function resolveItineraryNcpCredentials() {
 itineraryRouter.post("/route", async (req, res) => {
   const parsed = routeBodySchema.safeParse(req.body);
   if (!parsed.success) {
+    devLog("itinerary.route", { ok: false, error: "INVALID_BODY", issues: parsed.error.issues.map((i) => i.path.join(".")) });
     return res.status(400).json({ ok: false, error: "INVALID_BODY" });
   }
 
@@ -192,10 +198,32 @@ itineraryRouter.post("/route", async (req, res) => {
   const credentials = { keyId, key };
 
   const geminiApiKey = envFirst("GEMINI_API_KEY", "gemini_api_key");
+  devLog("itinerary.route.request", {
+    departureQuery: parsed.data.departureQuery,
+    hasDepartureCoords: parsed.data.departureLat != null && parsed.data.departureLng != null,
+    stopCount: parsed.data.stops.length,
+    stops: parsed.data.stops.map((s, index) => ({
+      order: index + 1,
+      title: s.title,
+      lat: s.lat,
+      lng: s.lng,
+      kind: s.kind ?? null,
+    })),
+    geminiConfigured: Boolean(geminiApiKey),
+  });
 
   try {
     const route = await buildItineraryDrivingRoute(parsed.data, credentials, undefined, {
       geminiApiKey,
+    });
+    devLog("itinerary.route.result", {
+      ok: true,
+      departure: route.departure,
+      stopCount: route.stops.length,
+      legCount: route.legs.length,
+      totalDistanceM: route.totalDistanceM,
+      totalDurationMs: route.totalDurationMs,
+      pathPointCount: route.path.length,
     });
     return res.json({
       ok: true,
@@ -205,10 +233,12 @@ itineraryRouter.post("/route", async (req, res) => {
     const msg = String(err?.message ?? "ROUTE_FAILED");
     const ncpStatus = err?.ncpHttpStatus;
     if (ncpStatus === 401 || ncpStatus === 403) {
+      devLog("itinerary.route.result", { ok: false, error: "NCP_AUTH_FAILED", ncpStatus });
       return res.status(400).json({ ok: false, error: "NCP_AUTH_FAILED" });
     }
     if (msg === "GEOCODE_NOT_FOUND") {
       const dbg = err?.geocodeDebug && typeof err.geocodeDebug === "object" ? err.geocodeDebug : {};
+      devLog("itinerary.route.result", { ok: false, error: "GEOCODE_NOT_FOUND", ...dbg });
       return res.status(400).json({
         ok: false,
         error: "GEOCODE_NOT_FOUND",
@@ -216,6 +246,7 @@ itineraryRouter.post("/route", async (req, res) => {
       });
     }
     if (typeof err?.ncpRouteCode === "number") {
+      devLog("itinerary.route.result", { ok: false, error: msg.slice(0, 200), code: err.ncpRouteCode });
       return res.status(400).json({ ok: false, error: msg.slice(0, 200), code: err.ncpRouteCode });
     }
     console.error("[itinerary/route]", err);
