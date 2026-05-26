@@ -44,6 +44,10 @@ function escapeHtml(s: string): string {
     .replace(/'/g, '&#39;')
 }
 
+function displayDbText(value: string | null | undefined, fallback: string) {
+  return value?.replace(/<br\s*\/?>/gi, '\n').replace(/[ \t\f\v]+/g, ' ').trim() || fallback
+}
+
 type ItineraryDownloadAiState = {
   scheduleText: string | null
   scheduleLoading: boolean
@@ -88,8 +92,8 @@ function buildItineraryDownloadHtml(
               const pin = pinForRouteStopOrder(s.order, cartDays, tripHotelId)
               const hotel = Boolean(pin && isHotelPin(pin))
               const badge = itineraryStopBadgeHtml(s.order, bg, hotel)
-              const time = s.time?.trim() ? escapeHtml(s.time) : '정보 없음'
-              const fee = s.fee?.trim() ? escapeHtml(s.fee) : '정보 없음'
+              const time = escapeHtml(displayDbText(s.time, '정보 없음'))
+              const fee = escapeHtml(displayDbText(s.fee, '정보 없음'))
               return `<li class="stop"><div class="stopTitle">${badge}${escapeHtml(s.title)}</div><dl class="stopDl"><div><dt>관람/운영</dt><dd>${time}</dd></div><div><dt>입장료</dt><dd>${fee}</dd></div></dl></li>`
             })
             .join('')}</ul>`
@@ -462,11 +466,11 @@ export function ItineraryRoutePanel({
                         <dl className="mapItineraryStopDl">
                           <div>
                             <dt>관람/운영</dt>
-                            <dd>{s.time?.trim() ? s.time : '정보 없음'}</dd>
+                            <dd>{displayDbText(s.time, '정보 없음')}</dd>
                           </div>
                           <div>
                             <dt>입장료</dt>
-                            <dd>{s.fee?.trim() ? s.fee : '정보 없음'}</dd>
+                            <dd>{displayDbText(s.fee, '정보 없음')}</dd>
                           </div>
                         </dl>
                       </li>

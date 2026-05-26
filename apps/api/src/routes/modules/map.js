@@ -31,6 +31,14 @@ function collection(name) {
   return getMongoDb().collection(name);
 }
 
+function todayIsoDate() {
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 function regionQueryForRegion(region) {
   if (region === "busan") {
     return {
@@ -137,6 +145,7 @@ mapRouter.get("/summary-pins", async (req, res) => {
   const date = parsed.data.date ?? null;
   const rangeFrom = parsed.data.from ?? null;
   const rangeTo = parsed.data.to ?? null;
+  const today = todayIsoDate();
   const limit = parsed.data.limit ?? null;
   const regionQuery = regionQueryForRegion(region);
   if (!regionQuery) return res.status(400).json({ ok: false, error: "UNSUPPORTED_REGION" });
@@ -149,8 +158,8 @@ mapRouter.get("/summary-pins", async (req, res) => {
     const dateQuery = date
       ? { startDate: { $lte: date }, endDate: { $gte: date } }
       : rangeFrom && rangeTo
-        ? { startDate: { $lte: rangeTo }, endDate: { $gte: rangeFrom } }
-        : {};
+        ? { startDate: { $lte: rangeTo }, endDate: { $gte: rangeFrom >= today ? rangeFrom : today } }
+        : { endDate: { $gte: today } };
     const festivalQuery = {
       ...regionQuery,
       ...dateQuery,
@@ -224,7 +233,7 @@ mapRouter.get("/summary-pins", async (req, res) => {
 
   devLog("map.summary-pins.result", {
     ok: true,
-    request: { kind, region, date, from: rangeFrom, to: rangeTo, limit },
+    request: { kind, region, date, from: rangeFrom, to: rangeTo, limit, today, expiredFestivalsHidden: true },
     sourceCollections: ["festivals", "busan_places"],
     returned: { total: pins.length, festivals: festivalCount, tours: tourCount },
     pinFields: [

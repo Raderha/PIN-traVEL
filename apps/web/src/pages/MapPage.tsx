@@ -180,7 +180,7 @@ function escapeHtml(value: string) {
 }
 
 function compactText(value: string | null | undefined, fallback: string) {
-  const trimmed = value?.replace(/\s+/g, ' ').trim()
+  const trimmed = value?.replace(/<br\s*\/?>/gi, '\n').replace(/[ \t\f\v]+/g, ' ').trim()
   return trimmed || fallback
 }
 
@@ -207,7 +207,7 @@ function addressText(pin: SummaryPin) {
 }
 
 function formatDbText(value: string | null | undefined, fallback: string) {
-  const text = compactText(value, fallback).replace(/<br\s*\/?>/gi, '\n')
+  const text = compactText(value, fallback)
   return text.replace(/^(가능|불가|없음)\s*요금\s*\(([^)]+)\)$/u, '$1\n요금: $2')
 }
 
@@ -216,7 +216,7 @@ function detailImageUrl(pin: SummaryPin) {
 }
 
 function placeLabel(pin: SummaryPin) {
-  if (pin.kind === 'festival') return compactText(pin.detail?.eventPlace, '행사장 정보 없음')
+  if (pin.kind === 'festival') return formatDbText(pin.detail?.eventPlace, '행사장 정보 없음')
   return formatDbText(pin.detail?.parking, '주차 정보 없음')
 }
 
@@ -225,7 +225,7 @@ function contactText(pin: SummaryPin) {
 }
 
 function overviewText(pin: SummaryPin) {
-  return compactText(pin.overview, '상세 설명 정보 없음')
+  return formatDbText(pin.overview, '상세 설명 정보 없음')
 }
 
 function formatDistance(meters: number) {
@@ -358,20 +358,35 @@ function pinTemplateUrlForPin(pin: SummaryPin) {
   }
 }
 
-function createSummaryPinContent(pin: SummaryPin) {
+function createSummaryPinContent(
+  pin: SummaryPin,
+  overlap?: { groupKey: string; pins: SummaryPin[]; activeIndex: number },
+) {
   const title = escapeHtml(compactText(pin.title, '이름 없음'))
-  const fee = escapeHtml(compactText(pin.summary.fee, '요금 정보 없음'))
+  const fee = escapeHtml(formatDbText(pin.summary.fee, '요금 정보 없음'))
   const dateRange = escapeHtml(summaryDateRange(pin))
   const iconUrl = escapeHtml(iconUrlForPin(pin))
   const pinUrl = escapeHtml(pinTemplateUrlForPin(pin))
+  const tabs =
+    overlap && overlap.pins.length > 1
+      ? `<div class="summaryPinTabs" aria-label="겹친 핀 선택">${overlap.pins
+          .map((p, index) => {
+            const active = index === overlap.activeIndex
+            return `<button class="summaryPinTab ${active ? 'active' : ''}" type="button" data-overlap-group="${escapeHtml(overlap.groupKey)}" data-overlap-index="${index}" data-pin-id="${escapeHtml(p.id)}" aria-label="${index + 1}번째 겹친 핀 보기">${index + 1}</button>`
+          })
+          .join('')}</div>`
+      : ''
 
   return `
-    <div class="summaryPinMarker" style="background-image: url('${pinUrl}')">
-      <img class="summaryPinIcon" src="${iconUrl}" alt="" />
-      <div class="summaryPinText">
-        <div class="summaryPinTitle">${title}</div>
-        <div class="summaryPinLine">${fee}</div>
-        <div class="summaryPinLine">${dateRange}</div>
+    <div class="${overlap && overlap.pins.length > 1 ? 'summaryPinOverlapShell' : ''}">
+      ${tabs}
+      <div class="summaryPinMarker" style="background-image: url('${pinUrl}')">
+        <img class="summaryPinIcon" src="${iconUrl}" alt="" />
+        <div class="summaryPinText">
+          <div class="summaryPinTitle">${title}</div>
+          <div class="summaryPinLine">${fee}</div>
+          <div class="summaryPinLine">${dateRange}</div>
+        </div>
       </div>
     </div>
   `
@@ -424,36 +439,24 @@ function clusterPinsByZoom(pins: SummaryPin[], zoom: number) {
   }))
 }
 
-function spreadPinsForDisplay(pins: SummaryPin[]) {
+function overlapGroupKey(pin: SummaryPin) {
+  return `${pin.location.lat.toFixed(5)}:${pin.location.lng.toFixed(5)}`
+}
+
+function groupPinsForTabbedDisplay(pins: SummaryPin[]) {
   const groups = new Map<string, SummaryPin[]>()
   for (const pin of pins) {
-    const key = `${pin.location.lat.toFixed(5)}:${pin.location.lng.toFixed(5)}`
+    const key = overlapGroupKey(pin)
     const group = groups.get(key)
     if (group) group.push(pin)
     else groups.set(key, [pin])
   }
 
-  const displayed: Array<{ pin: SummaryPin; location: { lat: number; lng: number } }> = []
-  for (const group of groups.values()) {
-    if (group.length === 1) {
-      displayed.push({ pin: group[0], location: group[0].location })
-      continue
-    }
-
-    const radius = 0.00018
-    group.forEach((pin, index) => {
-      const angle = (Math.PI * 2 * index) / group.length
-      displayed.push({
-        pin,
-        location: {
-          lat: pin.location.lat + Math.sin(angle) * radius,
-          lng: pin.location.lng + Math.cos(angle) * radius,
-        },
-      })
-    })
-  }
-
-  return displayed
+  return Array.from(groups.entries()).map(([groupKey, group]) => ({
+    groupKey,
+    pins: group,
+    location: group[0].location,
+  }))
 }
 
 function installNaverMapAuthFailureHandler(onFail: () => void) {
@@ -591,6 +594,7 @@ export function MapPage() {
   const recommendationMarkerListenersRef = useRef<NaverEventListener[]>([])
   const [summaryPins, setSummaryPins] = useState<SummaryPin[]>([])
   const [selectedPin, setSelectedPin] = useState<SummaryPin | null>(null)
+  const [overlapPinIndexes, setOverlapPinIndexes] = useState<Record<string, number>>({})
   const [cartDays, setCartDays] = useState<SummaryPin[][]>(() => loadStoredCartDays())
   /** 여러 일차 맨 끝에 자동 배치되는 숙소(다른 숙소를 담으면 교체) */
   const [tripHotelId, setTripHotelId] = useState<string | null>(null)
@@ -872,6 +876,36 @@ export function MapPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- selectedPin.id
   }, [selectedPin?.id])
 
+  useEffect(() => {
+    const el = mapElementRef.current
+    if (!el) return
+    const mapElement = el
+
+    function onOverlapTabClick(event: MouseEvent) {
+      const target = event.target instanceof HTMLElement ? event.target : null
+      const button = target?.closest<HTMLButtonElement>('.summaryPinTab')
+      if (!button || !mapElement.contains(button)) return
+
+      event.preventDefault()
+      event.stopPropagation()
+      event.stopImmediatePropagation()
+
+      const groupKey = button.dataset.overlapGroup
+      const pinId = button.dataset.pinId
+      const index = Number(button.dataset.overlapIndex)
+      if (!groupKey || !pinId || !Number.isInteger(index)) return
+
+      const pin = summaryPins.find((p) => p.id === pinId)
+      if (!pin) return
+
+      setOverlapPinIndexes((prev) => ({ ...prev, [groupKey]: index }))
+      setSelectedPin(pin)
+    }
+
+    mapElement.addEventListener('click', onOverlapTabClick, true)
+    return () => mapElement.removeEventListener('click', onOverlapTabClick, true)
+  }, [summaryPins])
+
   async function loadAiRecommendations(pin: SummaryPin) {
     setAiRecommendationLoading(true)
     setAiRecommendationError(null)
@@ -1035,17 +1069,17 @@ export function MapPage() {
             </div>
             <div>
               <dt>{pin.kind === 'festival' ? '기간' : '운영'}</dt>
-              <dd>{summaryDateRange(pin)}</dd>
+              <dd>{formatDbText(summaryDateRange(pin), '운영 정보 없음')}</dd>
             </div>
             {pin.kind === 'tour' ? (
               <div>
                 <dt>휴무</dt>
-                <dd>{compactText(pin.summary.restDate, '휴무 정보 없음')}</dd>
+                <dd>{formatDbText(pin.summary.restDate, '휴무 정보 없음')}</dd>
               </div>
             ) : null}
             <div>
               <dt>요금</dt>
-              <dd>{compactText(pin.summary.fee, '요금 정보 없음')}</dd>
+              <dd>{formatDbText(pin.summary.fee, '요금 정보 없음')}</dd>
             </div>
             <div>
               <dt>문의</dt>
@@ -1315,14 +1349,20 @@ export function MapPage() {
       if (pinsInView.length === 0) return
 
       if (zoom >= CLUSTER_UNLOCK_ZOOM) {
-        spreadPinsForDisplay(pinsInView).forEach(({ pin, location }) => {
+        groupPinsForTabbedDisplay(pinsInView).forEach(({ groupKey, pins, location }) => {
+          const activeIndex = Math.min(Math.max(overlapPinIndexes[groupKey] ?? 0, 0), pins.length - 1)
+          const pin = pins[activeIndex]
+          const hasOverlapTabs = pins.length > 1
           const marker = new maps.Marker({
             position: new maps.LatLng(location.lat, location.lng),
             map: mapInstance,
             icon: {
-              content: createSummaryPinContent(pin),
-              size: new maps.Size(192, 106),
-              anchor: new maps.Point(96, 106),
+              content: createSummaryPinContent(
+                pin,
+                hasOverlapTabs ? { groupKey, pins, activeIndex } : undefined,
+              ),
+              size: new maps.Size(192, hasOverlapTabs ? 128 : 106),
+              anchor: new maps.Point(96, hasOverlapTabs ? 128 : 106),
             },
           })
           markersRef.current.push(marker)
@@ -1399,7 +1439,7 @@ export function MapPage() {
       recommendationMarkerListenersRef.current = []
       clearMarkers()
     }
-  }, [filteredSummaryPins, mapReady, itineraryRoute, itinerarySummaryPinsOn])
+  }, [filteredSummaryPins, mapReady, itineraryRoute, itinerarySummaryPinsOn, overlapPinIndexes])
 
   useEffect(() => {
     const maps = getNaverMaps()
