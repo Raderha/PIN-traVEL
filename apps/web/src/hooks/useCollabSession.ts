@@ -5,11 +5,26 @@ import { fetchSession, type CollabSessionState, type SummaryPin } from '../lib/a
 import { normalizeCollabCartPayload } from '../lib/collabCart'
 import { emptyCollabItinerary, normalizeCollabItineraryPayload, type CollabItineraryPayload } from '../lib/collabItinerary'
 
+function escapeHtml(s: string): string {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+const CURSOR_COLORS = ['#2563eb', '#dc2626', '#059669', '#d97706', '#7c3aed', '#db2777']
+function colorForName(username: string) {
+  let h = 0
+  for (let i = 0; i < username.length; i++) h = (h * 31 + username.charCodeAt(i)) | 0
+  return CURSOR_COLORS[Math.abs(h) % CURSOR_COLORS.length]
+}
+
 export type RemoteCursor = {
   username: string
-  x: number
-  y: number
-  updatedAt: number
+  lat: number
+  lng: number
 }
 
 type MapView = { center: { lat: number; lng: number }; zoom: number }
@@ -29,7 +44,24 @@ type UseCollabSessionParams = {
   mapReady: boolean
   mapRef: RefObject<NaverMapLike | null>
   mapElementRef: RefObject<HTMLElement | null>
-  getNaverMaps: () => { LatLng: new (lat: number, lng: number) => unknown } | undefined
+  getNaverMaps: () =>
+    | {
+        LatLng: new (lat: number, lng: number) => unknown
+        Point?: new (x: number, y: number) => unknown
+        Marker?: new (options: {
+          position: unknown
+          map: unknown
+          zIndex?: number
+          icon?: { content: string; size?: unknown; anchor?: unknown }
+        }) => unknown
+        Event?: {
+          addListener: (t: unknown, e: string, fn: (ev?: unknown) => void) => unknown
+          removeListener: (l: unknown) => void
+        }
+      }
+    | undefined
+  /** true면 게스트 지도를 호스트 뷰로 강제 동기화 */
+  syncHostMapView?: boolean
   cartDays: SummaryPin[][]
   tripHotelId: string | null
   setCartDays: Dispatch<SetStateAction<SummaryPin[][]>>
@@ -132,6 +164,7 @@ export function useCollabSession({
   mapRef,
   mapElementRef,
   getNaverMaps,
+  syncHostMapView = true,
   cartDays,
   tripHotelId,
   setCartDays,
@@ -156,6 +189,8 @@ export function useCollabSession({
   const pendingGuestViewRef = useRef<MapView | null>(null)
   const lastCursorEmitRef = useRef(0)
   const collabMapListenersRef = useRef<Array<{ remove?: () => void }>>([])
+  const cursorMarkersRef = useRef<Map<string, unknown>>(new Map())
+  const cursorMarkerListenersRef = useRef<Array<{ remove?: () => void }>>([])
 
   const cartDaysRef = useRef(cartDays)
   const tripHotelIdRef = useRef(tripHotelId)
@@ -316,9 +351,11 @@ export function useCollabSession({
           if (cancelled || payload.sessionId !== sessionId) return
           setConnected(true)
           setSessionError(null)
-          if (!isHostRef.current) {
+          if (!isHostRef.current && syncHostMapView) {
             const view = stateMapView(payload.state)
             if (view) applyGuestViewRef.current(view)
+          }
+          if (!isHostRef.current) {
             if (payload.state?.cart) applyRemoteCartRef.current(payload.state.cart)
           }
           if (payload.state?.itinerary) {
@@ -339,27 +376,51 @@ export function useCollabSession({
         }
 
         const onSessionMap = (payload: { center?: { lat: number; lng: number }; zoom?: number }) => {
-          if (cancelled || isHostRef.current) return
+          if (cancelled || isHostRef.current || !syncHostMapView) return
           if (!payload.center || payload.zoom == null) return
           applyGuestViewRef.current({ center: payload.center, zoom: payload.zoom })
         }
 
-        const onSessionCursor = (payload: { username?: string; x?: number; y?: number }) => {
+        const onSessionCursor = (payload: { username?: string; lat?: number; lng?: number }) => {
           if (cancelled) return
           const name = payload.username ?? 'guest'
           if (name === usernameRef.current) return
-          if (typeof payload.x !== 'number' || typeof payload.y !== 'number') return
+          if (typeof payload.lat !== 'number' || typeof payload.lng !== 'number') return
           setRemoteCursors((prev) => {
             const next = prev.filter((c) => c.username !== name)
-            next.push({ username: name, x: payload.x!, y: payload.y!, updatedAt: Date.now() })
+            next.push({ username: name, lat: payload.lat!, lng: payload.lng! })
             return next
           })
+
+          // projection 없이도 확실히 보이도록: 지도 마커로 커서 표시
+          try {
+            const maps = getNaverMapsRef.current()
+            const map = mapRefStable.current.current as unknown as { setCenter?: (p: unknown) => void } | null
+            if (!maps?.Marker || !maps?.LatLng || !map) return
+            const pos = new maps.LatLng(payload.lat!, payload.lng!)
+            const existing = cursorMarkersRef.current.get(name) as any
+            if (existing?.setPosition) {
+              existing.setPosition(pos)
+            } else {
+              const marker = new maps.Marker({
+                position: pos,
+                map,
+                zIndex: 10_000,
+                icon: {
+                  content: `<div class="collabCursorMarker" style="--cursor-color:${colorForName(name)}"><span class="dot"></span><span class="label">${escapeHtml(name)}</span></div>`,
+                },
+              }) as any
+              cursorMarkersRef.current.set(name, marker)
+            }
+          } catch {
+            /* ignore */
+          }
         }
 
         const onMemberJoined = () => {
           if (cancelled || !isHostRef.current) return
           window.setTimeout(() => {
-            emitMapViewNowRef.current()
+            if (syncHostMapView) emitMapViewNowRef.current()
             emitCartNowRef.current()
             emitItineraryNowRef.current()
           }, 200)
@@ -368,6 +429,9 @@ export function useCollabSession({
         const onMemberLeft = (payload: { username?: string }) => {
           if (!payload.username) return
           setRemoteCursors((prev) => prev.filter((c) => c.username !== payload.username))
+          const m = cursorMarkersRef.current.get(payload.username) as any
+          if (m?.setMap) m.setMap(null)
+          cursorMarkersRef.current.delete(payload.username)
         }
 
         socket.on('connect', joinSession)
@@ -395,7 +459,7 @@ export function useCollabSession({
 
         if (!host) {
           const view = stateMapView(r.session.state)
-          if (view) applyGuestViewRef.current(view)
+          if (syncHostMapView && view) applyGuestViewRef.current(view)
           if (r.session.state?.cart) applyRemoteCartRef.current(r.session.state.cart)
           applyRemoteItineraryRef.current(r.session.state?.itinerary ?? emptyCollabItinerary())
         } else if (r.session.state?.itinerary) {
@@ -428,6 +492,8 @@ export function useCollabSession({
       socketRef.current = null
       setConnected(false)
       setRemoteCursors([])
+      cursorMarkersRef.current.forEach((m: any) => m?.setMap?.(null))
+      cursorMarkersRef.current.clear()
     }
   }, [sessionId, enabled])
 
@@ -436,22 +502,23 @@ export function useCollabSession({
     const map = mapRef.current
     if (!map) return
 
-    setGuestMapInteraction(map, !isHostRef.current)
+    // 지도 뷰 강제 동기화 모드일 때만 게스트 조작을 막음
+    setGuestMapInteraction(map, Boolean(syncHostMapView && !isHostRef.current))
 
     const pending = pendingGuestViewRef.current
-    if (!isHostRef.current && pending) {
+    if (syncHostMapView && !isHostRef.current && pending) {
       pendingGuestViewRef.current = null
       applyGuestViewRef.current(pending)
     }
 
     if (isHostRef.current) {
-      emitMapViewNowRef.current()
+      if (syncHostMapView) emitMapViewNowRef.current()
     }
 
     return () => {
       if (mapRef.current) setGuestMapInteraction(mapRef.current, false)
     }
-  }, [enabled, sessionId, mapReady, isHost, mapRef])
+  }, [enabled, sessionId, mapReady, isHost, mapRef, syncHostMapView])
 
   useEffect(() => {
     if (!enabled || !sessionId || !mapReady || !isHost) return
@@ -491,28 +558,33 @@ export function useCollabSession({
   }, [enabled, sessionId, mapReady, isHost, mapRef, getNaverMaps])
 
   useEffect(() => {
-    if (!enabled || !sessionId || !connected) return
+    if (!enabled || !sessionId || !connected || !mapReady) return
+    const sock = socketRef.current
+    const map = mapRef.current as unknown
+    const maps = getNaverMaps()
+    if (!sock?.connected || !maps?.Event || !map) return
 
-    const onMove = (e: MouseEvent) => {
-      const el = mapElementRef.current
-      const sock = socketRef.current
-      if (!el || !sock?.connected) return
-      const rect = el.getBoundingClientRect()
-      if (rect.width <= 0 || rect.height <= 0) return
-      if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) {
-        return
+    // 지도 이벤트의 coord(lat/lng)를 그대로 사용 (projection 불필요)
+    const listener = maps.Event.addListener(map, 'mousemove', (ev?: any) => {
+      try {
+        const coord = ev?.coord ?? ev?.latlng ?? ev?.latLng
+        const ll = latLngToNumbers(coord)
+        if (!ll) return
+        const now = Date.now()
+        if (now - lastCursorEmitRef.current < 36) return
+        lastCursorEmitRef.current = now
+        sock.emit('session:cursor', { lat: ll.lat, lng: ll.lng })
+      } catch {
+        /* ignore */
       }
-      const now = Date.now()
-      if (now - lastCursorEmitRef.current < 36) return
-      lastCursorEmitRef.current = now
-      const x = (e.clientX - rect.left) / rect.width
-      const y = (e.clientY - rect.top) / rect.height
-      sock.emit('session:cursor', { x, y })
-    }
+    })
+    cursorMarkerListenersRef.current.push({ remove: () => maps.Event?.removeListener?.(listener) })
 
-    window.addEventListener('mousemove', onMove, { passive: true })
-    return () => window.removeEventListener('mousemove', onMove)
-  }, [enabled, sessionId, connected, mapElementRef])
+    return () => {
+      cursorMarkerListenersRef.current.forEach((l) => l.remove?.())
+      cursorMarkerListenersRef.current = []
+    }
+  }, [enabled, sessionId, connected, mapReady, mapRef, getNaverMaps])
 
   useEffect(() => {
     if (!enabled || !sessionId || !connected) return
@@ -528,14 +600,7 @@ export function useCollabSession({
     return () => window.clearTimeout(timer)
   }, [itineraryPayload, enabled, sessionId, connected, isHost])
 
-  useEffect(() => {
-    if (!enabled) return
-    const id = window.setInterval(() => {
-      const cutoff = Date.now() - 8000
-      setRemoteCursors((prev) => (prev.some((c) => c.updatedAt < cutoff) ? prev.filter((c) => c.updatedAt >= cutoff) : prev))
-    }, 2000)
-    return () => window.clearInterval(id)
-  }, [enabled])
+  // 커서는 idle 상태여도 유지 (member-left에서만 제거)
 
   return { connected, isHost, remoteCursors, sessionError }
 }

@@ -1300,6 +1300,40 @@ button.homeLandingCta {
   vertical-align: top;
 }
 
+/* 협업 커서 (지도 마커 fallback) */
+.collabCursorMarker {
+  position: relative;
+  transform: translate(-2px, -2px);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.collabCursorMarker .dot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  border-radius: 50%;
+  background: var(--cursor-color, #2563eb);
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+}
+
+.collabCursorMarker .label {
+  display: inline-block;
+  margin-left: 6px;
+  margin-top: -2px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--cursor-color, #2563eb);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  vertical-align: top;
+}
+
 .mapCollabBadge {
   position: absolute;
   left: 50%;

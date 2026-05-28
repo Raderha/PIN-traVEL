@@ -59,6 +59,7 @@ type NaverMapInstance = {
 }
 type NaverMarkerInstance = {
   setMap(map: NaverMapInstance | null): void
+  setZIndex?: (zIndex: number) => void
 }
 type NaverMaps = {
   LatLng: new (lat: number, lng: number) => NaverLatLng
@@ -588,6 +589,9 @@ export function MapPage() {
   const mapElementRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<NaverMapInstance | null>(null)
   const markersRef = useRef<NaverMarkerInstance[]>([])
+  const markerByPinIdRef = useRef<Map<string, NaverMarkerInstance>>(new Map())
+  const markerByOverlapGroupRef = useRef<Map<string, NaverMarkerInstance>>(new Map())
+  const selectedMarkerRef = useRef<{ marker: NaverMarkerInstance; baseZ: number } | null>(null)
   const recommendationMarkersRef = useRef<NaverMarkerInstance[]>([])
   const mapListenersRef = useRef<NaverEventListener[]>([])
   const markerListenersRef = useRef<NaverEventListener[]>([])
@@ -747,6 +751,7 @@ export function MapPage() {
     mapRef,
     mapElementRef,
     getNaverMaps,
+    syncHostMapView: false,
     cartDays,
     tripHotelId,
     setCartDays,
@@ -900,6 +905,14 @@ export function MapPage() {
 
       setOverlapPinIndexes((prev) => ({ ...prev, [groupKey]: index }))
       setSelectedPin(pin)
+
+      const marker = markerByOverlapGroupRef.current.get(groupKey)
+      if (marker?.setZIndex) {
+        const prev = selectedMarkerRef.current
+        if (prev && prev.marker !== marker) prev.marker.setZIndex?.(prev.baseZ)
+        marker.setZIndex(10_000)
+        selectedMarkerRef.current = { marker, baseZ: 100 }
+      }
     }
 
     mapElement.addEventListener('click', onOverlapTabClick, true)
@@ -1324,6 +1337,9 @@ export function MapPage() {
       markerListenersRef.current = []
       markersRef.current.forEach((marker) => marker.setMap(null))
       markersRef.current = []
+      markerByPinIdRef.current.clear()
+      markerByOverlapGroupRef.current.clear()
+      selectedMarkerRef.current = null
     }
 
     function visiblePins() {
@@ -1348,14 +1364,24 @@ export function MapPage() {
       const pinsInView = visiblePins()
       if (pinsInView.length === 0) return
 
+      const bringMarkerToFront = (marker: NaverMarkerInstance, baseZ: number) => {
+        if (!marker.setZIndex) return
+        const prev = selectedMarkerRef.current
+        if (prev && prev.marker !== marker) prev.marker.setZIndex?.(prev.baseZ)
+        marker.setZIndex(10_000)
+        selectedMarkerRef.current = { marker, baseZ }
+      }
+
       if (zoom >= CLUSTER_UNLOCK_ZOOM) {
         groupPinsForTabbedDisplay(pinsInView).forEach(({ groupKey, pins, location }) => {
           const activeIndex = Math.min(Math.max(overlapPinIndexes[groupKey] ?? 0, 0), pins.length - 1)
           const pin = pins[activeIndex]
           const hasOverlapTabs = pins.length > 1
+          const baseZ = 100
           const marker = new maps.Marker({
             position: new maps.LatLng(location.lat, location.lng),
             map: mapInstance,
+            zIndex: baseZ,
             icon: {
               content: createSummaryPinContent(
                 pin,
@@ -1366,7 +1392,14 @@ export function MapPage() {
             },
           })
           markersRef.current.push(marker)
-          markerListenersRef.current.push(maps.Event.addListener(marker, 'click', () => setSelectedPin(pin)))
+          markerByOverlapGroupRef.current.set(groupKey, marker)
+          markerByPinIdRef.current.set(pin.id, marker)
+          markerListenersRef.current.push(
+            maps.Event.addListener(marker, 'click', () => {
+              bringMarkerToFront(marker, baseZ)
+              setSelectedPin(pin)
+            }),
+          )
         })
         return
       }
@@ -1377,9 +1410,11 @@ export function MapPage() {
           const count = cluster.pins.length
           if (count === 1 && zoom > SINGLE_CLUSTER_MAX_ZOOM) {
             const pin = cluster.pins[0]
+            const baseZ = 100
             const marker = new maps.Marker({
               position: new maps.LatLng(pin.location.lat, pin.location.lng),
               map: mapInstance,
+              zIndex: baseZ,
               icon: {
                 content: createSummaryPinContent(pin),
                 size: new maps.Size(192, 106),
@@ -1387,7 +1422,13 @@ export function MapPage() {
               },
             })
             markersRef.current.push(marker)
-            markerListenersRef.current.push(maps.Event.addListener(marker, 'click', () => setSelectedPin(pin)))
+            markerByPinIdRef.current.set(pin.id, marker)
+            markerListenersRef.current.push(
+              maps.Event.addListener(marker, 'click', () => {
+                bringMarkerToFront(marker, baseZ)
+                setSelectedPin(pin)
+              }),
+            )
             return
           }
 
@@ -1397,6 +1438,7 @@ export function MapPage() {
             new maps.Marker({
               position: new maps.LatLng(cluster.location.lat, cluster.location.lng),
               map: mapInstance,
+              zIndex: 10,
               icon: {
                 content: createClusterPinContent(count, clusterSize),
                 size: new maps.Size(clusterSize, clusterSize),
@@ -1408,9 +1450,11 @@ export function MapPage() {
         }
 
         const pin = cluster.pins[0]
+        const baseZ = 100
         const marker = new maps.Marker({
           position: new maps.LatLng(pin.location.lat, pin.location.lng),
           map: mapInstance,
+          zIndex: baseZ,
           icon: {
             content: createSummaryPinContent(pin),
             size: new maps.Size(192, 106),
@@ -1418,7 +1462,13 @@ export function MapPage() {
           },
         })
         markersRef.current.push(marker)
-        markerListenersRef.current.push(maps.Event.addListener(marker, 'click', () => setSelectedPin(pin)))
+        markerByPinIdRef.current.set(pin.id, marker)
+        markerListenersRef.current.push(
+          maps.Event.addListener(marker, 'click', () => {
+            bringMarkerToFront(marker, baseZ)
+            setSelectedPin(pin)
+          }),
+        )
       })
     }
 
@@ -1659,7 +1709,7 @@ export function MapPage() {
     <section className="mapPage">
       <div className="mapPageMapStack">
         <div ref={mapElementRef} className="mapCanvas" />
-        <SessionCursorOverlay cursors={collab.remoteCursors} />
+        <SessionCursorOverlay cursors={collab.remoteCursors} mapRef={mapRef} mapElementRef={mapElementRef} getNaverMaps={getNaverMaps} />
       </div>
 
       {collabSessionId ? (

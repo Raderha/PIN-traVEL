@@ -78,11 +78,11 @@ export function attachSocketServer(httpServer) {
       socket.to(sessionId).emit("session:member-joined", { username: socket.data.username });
     });
 
-    socket.on("session:cursor", ({ x, y }) => {
+    socket.on("session:cursor", ({ lat, lng }) => {
       const sessionId = socket.data.sessionId;
       if (!sessionId) return;
-      if (typeof x !== "number" || typeof y !== "number") return;
-      socket.to(sessionId).emit("session:cursor", { username: socket.data.username, x, y });
+      if (typeof lat !== "number" || typeof lng !== "number") return;
+      socket.to(sessionId).emit("session:cursor", { username: socket.data.username, lat, lng });
     });
 
     socket.on("session:map", ({ center, zoom }) => {
