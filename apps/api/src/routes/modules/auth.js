@@ -129,6 +129,8 @@ authRouter.post("/login", async (req, res) => {
 
 // UC3: 로그아웃(토큰 기반이면 클라이언트에서 폐기; 여기서는 호환용 엔드포인트 제공)
 authRouter.post("/logout", requireAuth, (req, res) => {
+  devLog("auth.logout.request", { userId: req.user?.userId ?? null, username: req.user?.username ?? null });
+  devLog("auth.logout.result", { ok: true, userId: req.user?.userId ?? null, username: req.user?.username ?? null });
   return res.json({ ok: true });
 });
 

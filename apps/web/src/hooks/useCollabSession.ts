@@ -43,23 +43,8 @@ type UseCollabSessionParams = {
   enabled: boolean
   mapReady: boolean
   mapRef: RefObject<NaverMapLike | null>
-  mapElementRef: RefObject<HTMLElement | null>
-  getNaverMaps: () =>
-    | {
-        LatLng: new (lat: number, lng: number) => unknown
-        Point?: new (x: number, y: number) => unknown
-        Marker?: new (options: {
-          position: unknown
-          map: unknown
-          zIndex?: number
-          icon?: { content: string; size?: unknown; anchor?: unknown }
-        }) => unknown
-        Event?: {
-          addListener: (t: unknown, e: string, fn: (ev?: unknown) => void) => unknown
-          removeListener: (l: unknown) => void
-        }
-      }
-    | undefined
+  /** 지도 API(네이버) — 구체 타입 대신 느슨하게 받음(런타임 가드로 처리) */
+  getNaverMaps: () => any | undefined
   /** true면 게스트 지도를 호스트 뷰로 강제 동기화 */
   syncHostMapView?: boolean
   cartDays: SummaryPin[][]
@@ -162,7 +147,6 @@ export function useCollabSession({
   enabled,
   mapReady,
   mapRef,
-  mapElementRef,
   getNaverMaps,
   syncHostMapView = true,
   cartDays,

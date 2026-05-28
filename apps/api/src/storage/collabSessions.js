@@ -7,6 +7,11 @@ import { sessions } from "./memory.js";
 
 export const COLLAB_SESSIONS_COLLECTION = "collab_sessions";
 
+function devLog(event, payload) {
+  if (process.env.NODE_ENV === "production") return;
+  console.log(`[dev:${event}]`, payload);
+}
+
 const dirtyIds = new Set();
 /** sessionId → host socket.id (재접속은 게스트만, 호스트 중복 접속 차단) */
 const activeHostSocketIds = new Map();
@@ -71,6 +76,7 @@ export async function createCollabSession({ id, hostUserId }) {
 
   const session = sessionFromDbDoc(doc);
   sessions.set(id, session);
+  devLog("collab_sessions.create.result", { ok: true, sessionId: id, hostUserId });
   return session;
 }
 
@@ -83,6 +89,7 @@ export async function getCollabSession(id) {
 
   const session = sessionFromDbDoc(doc);
   sessions.set(id, session);
+  devLog("collab_sessions.get.cache_miss", { ok: true, sessionId: id, hostUserId: session.hostUserId });
   return session;
 }
 
@@ -159,7 +166,8 @@ export async function deleteCollabSession(id) {
   activeHostSocketIds.delete(id);
   activeParticipants.delete(id);
 
-  await getMongoDb().collection(COLLAB_SESSIONS_COLLECTION).deleteOne({ id });
+  const r = await getMongoDb().collection(COLLAB_SESSIONS_COLLECTION).deleteOne({ id });
+  devLog("collab_sessions.delete.result", { ok: true, sessionId: id, deletedCount: r.deletedCount ?? 0 });
 }
 
 async function flushOneSession(id) {
@@ -184,6 +192,8 @@ export async function flushDirtyCollabSessions() {
   const ids = [...dirtyIds];
   dirtyIds.clear();
 
+  devLog("collab_sessions.flush_dirty.start", { count: ids.length, ids: ids.slice(0, 10) });
+
   for (const id of ids) {
     try {
       await flushOneSession(id);
@@ -192,6 +202,8 @@ export async function flushDirtyCollabSessions() {
       dirtyIds.add(id);
     }
   }
+
+  devLog("collab_sessions.flush_dirty.done", { ok: true, flushed: ids.length, remainingDirty: dirtyIds.size });
 }
 
 export async function flushAllCachedCollabSessions() {

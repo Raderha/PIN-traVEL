@@ -248,6 +248,19 @@ export function login(params: { username: string; password: string }, signal?: A
   return postJson<LoginResponse>('/api/auth/login', params, signal)
 }
 
+export async function logout(signal?: AbortSignal) {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('pintravel_token') : null
+  if (!token) return { ok: true }
+  const res = await fetch('/api/auth/logout', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    signal,
+    credentials: 'include',
+  })
+  if (!res.ok) throw new Error(`HTTP_${res.status}`)
+  return (await res.json()) as { ok: true }
+}
+
 export async function createSession(signal?: AbortSignal) {
   const token = typeof window !== 'undefined' ? localStorage.getItem('pintravel_token') : null
   const res = await fetch('/api/sessions', {

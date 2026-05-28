@@ -749,7 +749,6 @@ export function MapPage() {
     enabled: Boolean(collabSessionId && readAuthToken()),
     mapReady,
     mapRef,
-    mapElementRef,
     getNaverMaps,
     syncHostMapView: false,
     cartDays,

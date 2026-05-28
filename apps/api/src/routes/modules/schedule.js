@@ -90,6 +90,7 @@ function scheduleHistoryItem(doc) {
 }
 
 scheduleRouter.get("/my", requireAuth, async (req, res) => {
+  devLog("schedule.my.request", { userId: req.user.userId, username: req.user.username });
   try {
     const db = getMongoDb();
     const schedules = await db
@@ -112,9 +113,28 @@ scheduleRouter.get("/my", requireAuth, async (req, res) => {
       .limit(50)
       .toArray();
 
-    devLog("schedule.my.result", { ok: true, userId: req.user.userId, count: schedules.length });
+    const summary = schedules.slice(0, 5).map((s) => {
+      const days = Array.isArray(s.visitDays) ? s.visitDays : [];
+      const dayCount = days.length;
+      const totalStops = days.reduce((sum, d) => sum + (Array.isArray(d?.stops) ? d.stops.length : 0), 0);
+      return {
+        tripStartDate: s.tripStartDate ?? null,
+        departure: s.departure ?? null,
+        dayCount,
+        totalStops,
+        participantCount: Number(s.participantCount) || 1,
+        createdAt: s.createdAt ?? null,
+      };
+    });
+    devLog("schedule.my.result", {
+      ok: true,
+      userId: req.user.userId,
+      count: schedules.length,
+      recent: summary,
+    });
     return res.json({ ok: true, schedules: schedules.map(scheduleHistoryItem) });
   } catch (err) {
+    devLog("schedule.my.result", { ok: false, userId: req.user.userId, error: "INTERNAL_ERROR" });
     console.error("[schedule/my]", err);
     return res.status(500).json({ ok: false, error: "INTERNAL_ERROR" });
   }

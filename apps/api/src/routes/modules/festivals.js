@@ -13,6 +13,11 @@ export const festivalsRouter = Router();
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "YYYY-MM-DD");
 
+function devLog(event, payload) {
+  if (process.env.NODE_ENV === "production") return;
+  console.log(`[dev:${event}]`, payload);
+}
+
 function festivalsCol() {
   return getMongoDb().collection("festivals");
 }
@@ -103,6 +108,7 @@ festivalsRouter.get("/main/active", async (req, res) => {
 
   const date = parsed.data.date ?? todayIsoDate();
   const limit = parsed.data.limit ?? 6;
+  devLog("festivals.main.active.request", { date, limit });
   const festivals = await festivalsCol()
     .find(
       { startDate: { $lte: date }, endDate: { $gte: date } },
@@ -113,6 +119,7 @@ festivalsRouter.get("/main/active", async (req, res) => {
     .sort({ endDate: 1, startDate: 1, title: 1 })
     .limit(limit)
     .toArray();
+  devLog("festivals.main.active.result", { ok: true, date, limit, count: festivals.length });
   return res.json({ ok: true, date, festivals: festivals.map(festivalListItem) });
 });
 
@@ -131,6 +138,7 @@ festivalsRouter.get("/calendar/day-counts", async (req, res) => {
   const ym = `${year}-${pad2(month)}`;
   const monthStart = `${ym}-01`;
   const monthEnd = `${ym}-${pad2(lastDay)}`;
+  devLog("festivals.calendar.day-counts.request", { year, month, monthStart, monthEnd });
 
   const festivals = await festivalsCol()
     .find(
@@ -144,6 +152,14 @@ festivalsRouter.get("/calendar/day-counts", async (req, res) => {
     const count = festivals.filter((f) => festivalActiveOnDate(f, date)).length;
     days.push({ date, count });
   }
+  devLog("festivals.calendar.day-counts.result", {
+    ok: true,
+    year,
+    month,
+    days: days.length,
+    matchedFestivals: festivals.length,
+    maxCount: days.reduce((m, x) => (x.count > m ? x.count : m), 0),
+  });
   return res.json({ ok: true, year, month, days });
 });
 
@@ -153,6 +169,7 @@ festivalsRouter.get("/calendar/day", async (req, res) => {
   if (!parsed.success) return res.status(400).json({ ok: false, error: "INVALID_QUERY" });
 
   const { date } = parsed.data;
+  devLog("festivals.calendar.day.request", { date });
   const festivals = await festivalsCol()
     .find(
       { startDate: { $lte: date }, endDate: { $gte: date } },
@@ -161,6 +178,7 @@ festivalsRouter.get("/calendar/day", async (req, res) => {
       }
     )
     .toArray();
+  devLog("festivals.calendar.day.result", { ok: true, date, count: festivals.length });
   return res.json({ ok: true, date, festivals: festivals.map(festivalListItem) });
 });
 

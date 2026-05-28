@@ -1,13 +1,19 @@
 import { useState } from 'react'
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 
+import { logout } from '../lib/api'
 import { clearPintravelClientStorage } from '../lib/clearPintravelStorage'
 
 export function HomeLandingHeader() {
   const nav = useNavigate()
   const [token, setToken] = useState(() => (typeof window !== 'undefined' ? localStorage.getItem('pintravel_token') : null))
 
-  function onLogout() {
+  async function onLogout() {
+    try {
+      await logout()
+    } catch {
+      // ignore
+    }
     clearPintravelClientStorage()
     setToken(null)
     nav('/', { replace: true })

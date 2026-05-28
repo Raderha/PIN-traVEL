@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 import logoUrl from '../assets/logo.png'
-import { createSession } from '../lib/api'
+import { createSession, logout } from '../lib/api'
 import { clearPintravelClientStorage } from '../lib/clearPintravelStorage'
 import { copyTextToClipboard } from '../lib/copyToClipboard'
 import { resolveShareableOrigin } from '../lib/shareableOrigin'
@@ -10,7 +10,12 @@ export function NavBar() {
   const nav = useNavigate()
   const [token, setToken] = useState(() => (typeof window !== 'undefined' ? localStorage.getItem('pintravel_token') : null))
 
-  function onLogout() {
+  async function onLogout() {
+    try {
+      await logout()
+    } catch {
+      // 서버 로그 목적이므로 실패해도 로컬 로그아웃은 진행
+    }
     clearPintravelClientStorage()
     setToken(null)
     nav('/', { replace: true })
@@ -75,7 +80,12 @@ export function MapNavBar() {
   const [sessionCopyManual, setSessionCopyManual] = useState(false)
   const sessionUrlInputRef = useRef<HTMLInputElement>(null)
 
-  function onLogout() {
+  async function onLogout() {
+    try {
+      await logout()
+    } catch {
+      // ignore
+    }
     clearPintravelClientStorage()
     setToken(null)
     nav('/', { replace: true })
