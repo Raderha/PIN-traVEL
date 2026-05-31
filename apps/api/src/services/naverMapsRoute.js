@@ -46,6 +46,10 @@ function formatLngLat(lat, lng) {
   return `${lng},${lat}`;
 }
 
+function isSameLocation(a, b) {
+  return Number(a.lat) === Number(b.lat) && Number(a.lng) === Number(b.lng);
+}
+
 async function ncpGetJson(url, { keyId, key }, signal) {
   const res = await fetch(url, {
     method: "GET",
@@ -281,12 +285,15 @@ export async function buildItineraryDrivingRoute(params, credentials, signal, op
   for (let i = 0; i < points.length - 1; i++) {
     const a = points[i];
     const b = points[i + 1];
-    const seg = await fetchDrivingSegment(
-      { lat: a.lat, lng: a.lng },
-      { lat: b.lat, lng: b.lng },
-      credentials,
-      signal,
-    );
+    /** NCP Directions는 출발·도착 좌표가 같으면 code 1 — 연속 동일 좌표는 0m 구간으로 처리 */
+    const seg = isSameLocation(a, b)
+      ? { distanceM: 0, durationMs: 0, path: [] }
+      : await fetchDrivingSegment(
+          { lat: a.lat, lng: a.lng },
+          { lat: b.lat, lng: b.lng },
+          credentials,
+          signal,
+        );
     legs.push({
       fromTitle: a.title,
       toTitle: b.title,
@@ -295,7 +302,7 @@ export async function buildItineraryDrivingRoute(params, credentials, signal, op
     });
     legPaths.push(seg.path.map((p) => ({ lat: p.lat, lng: p.lng })));
 
-    if (mergedPath.length === 0) {
+    if (mergedPath.length === 0 && seg.path.length > 0) {
       mergedPath.push(...seg.path);
     } else if (seg.path.length > 0) {
       const last = mergedPath[mergedPath.length - 1];

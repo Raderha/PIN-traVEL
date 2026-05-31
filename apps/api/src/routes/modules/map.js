@@ -57,7 +57,30 @@ function pointFromLocation(location) {
   return { lat, lng };
 }
 
-function festivalSummaryPin(f) {
+function festivalMapPin(f) {
+  const point = pointFromLocation(f.location);
+  if (!point) return null;
+
+  return {
+    id: `festival:${f.contentId}`,
+    contentId: f.contentId,
+    kind: "festival",
+    iconType: "festival",
+    title: f.title,
+    detail: {
+      eventPlace: f.eventPlace ?? null,
+    },
+    summary: {
+      fee: f.fee ?? null,
+      time: f.useTime ?? null,
+      startDate: f.startDate ?? null,
+      endDate: f.endDate ?? null,
+    },
+    location: point,
+  };
+}
+
+function festivalDetailPin(f) {
   const point = pointFromLocation(f.location);
   if (!point) return null;
 
@@ -91,7 +114,30 @@ function placeIconType(place) {
   return "natural";
 }
 
-function placeSummaryPin(place) {
+function placeMapPin(place) {
+  const point = pointFromLocation(place.location);
+  if (!point) return null;
+
+  return {
+    id: `tour:${place.contentId}`,
+    contentId: place.contentId,
+    contentTypeId: place.contentTypeId ?? null,
+    kind: "tour",
+    iconType: placeIconType(place),
+    title: place.title,
+    detail: {
+      category: place.category ?? null,
+    },
+    summary: {
+      fee: place.fee ?? null,
+      time: place.useTime ?? null,
+      restDate: place.restDate ?? null,
+    },
+    location: point,
+  };
+}
+
+function placeDetailPin(place) {
   const point = pointFromLocation(place.location);
   if (!point) return null;
 
@@ -123,6 +169,66 @@ function placeSummaryPin(place) {
   };
 }
 
+const FESTIVAL_MAP_PROJECTION = {
+  _id: 0,
+  contentId: 1,
+  title: 1,
+  startDate: 1,
+  endDate: 1,
+  location: 1,
+  eventPlace: 1,
+  useTime: 1,
+  fee: 1,
+};
+
+const FESTIVAL_DETAIL_PROJECTION = {
+  _id: 0,
+  contentId: 1,
+  title: 1,
+  startDate: 1,
+  endDate: 1,
+  address: 1,
+  location: 1,
+  image: 1,
+  tel: 1,
+  overview: 1,
+  eventPlace: 1,
+  useTime: 1,
+  fee: 1,
+};
+
+const PLACE_MAP_PROJECTION = {
+  _id: 0,
+  contentId: 1,
+  contentTypeId: 1,
+  title: 1,
+  category: 1,
+  location: 1,
+  useTime: 1,
+  restDate: 1,
+  fee: 1,
+};
+
+const PLACE_DETAIL_PROJECTION = {
+  _id: 0,
+  contentId: 1,
+  contentTypeId: 1,
+  title: 1,
+  category: 1,
+  address: 1,
+  location: 1,
+  image: 1,
+  images: 1,
+  zipcode: 1,
+  tel: 1,
+  infoCenter: 1,
+  overview: 1,
+  useTime: 1,
+  restDate: 1,
+  parking: 1,
+  fee: 1,
+};
+
 // UC4: 지도용 정보 요약형 핀 데이터. 프론트는 이 응답을 핀 템플릿/아이콘 assets와 결합해 지도에 렌더링한다.
 mapRouter.get("/summary-pins", async (req, res) => {
   const parsed = z
@@ -150,6 +256,12 @@ mapRouter.get("/summary-pins", async (req, res) => {
   const regionQuery = regionQueryForRegion(region);
   if (!regionQuery) return res.status(400).json({ ok: false, error: "UNSUPPORTED_REGION" });
 
+  const perfStartedAt = Date.now();
+  const perf = {
+    dbMs: { festivals: 0, places: 0 },
+    mapMs: { festivals: 0, places: 0 },
+  };
+
   const pins = [];
   let festivalCount = 0;
   let tourCount = 0;
@@ -165,31 +277,21 @@ mapRouter.get("/summary-pins", async (req, res) => {
       ...dateQuery,
     };
 
+    const tFestDb = Date.now();
     const festivals = await collection("festivals")
       .find(
         festivalQuery,
         {
-          projection: {
-            _id: 0,
-            contentId: 1,
-            title: 1,
-            startDate: 1,
-            endDate: 1,
-            address: 1,
-            location: 1,
-            image: 1,
-            tel: 1,
-            overview: 1,
-            eventPlace: 1,
-            useTime: 1,
-            fee: 1,
-          },
+          projection: FESTIVAL_MAP_PROJECTION,
         }
       )
       .sort({ endDate: 1, startDate: 1, title: 1 })
       .limit(limit == null ? 0 : kind === "all" ? Math.ceil(limit / 2) : limit)
       .toArray();
-    const festivalPins = festivals.map(festivalSummaryPin).filter(Boolean);
+    perf.dbMs.festivals = Date.now() - tFestDb;
+    const tFestMap = Date.now();
+    const festivalPins = festivals.map(festivalMapPin).filter(Boolean);
+    perf.mapMs.festivals = Date.now() - tFestMap;
     festivalCount = festivalPins.length;
     pins.push(...festivalPins);
   }
@@ -197,35 +299,21 @@ mapRouter.get("/summary-pins", async (req, res) => {
   if (kind === "all" || kind === "tour") {
     const remaining = limit == null ? null : Math.max(limit - pins.length, 0);
     if (remaining == null || remaining > 0) {
+      const tPlacesDb = Date.now();
       const places = await collection("busan_places")
         .find(
           regionQuery,
           {
-            projection: {
-              _id: 0,
-              contentId: 1,
-              contentTypeId: 1,
-              title: 1,
-              category: 1,
-              address: 1,
-              location: 1,
-              image: 1,
-              images: 1,
-              zipcode: 1,
-              tel: 1,
-              infoCenter: 1,
-              overview: 1,
-              useTime: 1,
-              restDate: 1,
-              parking: 1,
-              fee: 1,
-            },
+            projection: PLACE_MAP_PROJECTION,
           }
         )
         .sort({ title: 1 })
         .limit(remaining ?? 0)
         .toArray();
-      const placePins = places.map(placeSummaryPin).filter(Boolean);
+      perf.dbMs.places = Date.now() - tPlacesDb;
+      const tPlacesMap = Date.now();
+      const placePins = places.map(placeMapPin).filter(Boolean);
+      perf.mapMs.places = Date.now() - tPlacesMap;
       tourCount = placePins.length;
       pins.push(...placePins);
     }
@@ -243,15 +331,85 @@ mapRouter.get("/summary-pins", async (req, res) => {
       "kind",
       "iconType",
       "title",
-      "subtitle",
-      "address",
-      "image/images",
-      "tel/infoCenter",
-      "overview",
-      "detail",
+      "detail(category|eventPlace)",
       "summary",
       "location",
     ],
   });
-  return res.json({ ok: true, region, date, from: rangeFrom, to: rangeTo, pins });
+
+  const body = { ok: true, region, date, from: rangeFrom, to: rangeTo, pins };
+  const payloadJson = JSON.stringify(body);
+  const payloadBytes = Buffer.byteLength(payloadJson, "utf8");
+  devLog("map.summary-pins.perf", {
+    totalMs: Date.now() - perfStartedAt,
+    dbMs: perf.dbMs,
+    mapMs: perf.mapMs,
+    dbMsTotal: perf.dbMs.festivals + perf.dbMs.places,
+    mapMsTotal: perf.mapMs.festivals + perf.mapMs.places,
+    pinCount: pins.length,
+    payloadBytes,
+    payloadKb: Math.round((payloadBytes / 1024) * 10) / 10,
+  });
+  return res.json(body);
+});
+
+// UC4: 핀 클릭 시 상세 패널용 — overview·이미지·연락처 등 지도 목록에는 없는 필드
+mapRouter.get("/pins/:kind/:contentId", async (req, res) => {
+  const parsed = z
+    .object({
+      kind: z.enum(["festival", "tour"]),
+      contentId: z.string().min(1).max(80),
+      region: z.enum(["busan"]).optional(),
+    })
+    .safeParse({ ...req.params, region: req.query.region });
+  if (!parsed.success) {
+    return res.status(400).json({ ok: false, error: "INVALID_QUERY" });
+  }
+
+  const { kind, contentId } = parsed.data;
+  const region = parsed.data.region ?? "busan";
+  const regionQuery = regionQueryForRegion(region);
+  if (!regionQuery) return res.status(400).json({ ok: false, error: "UNSUPPORTED_REGION" });
+
+  const perfStartedAt = Date.now();
+
+  if (kind === "festival") {
+    const doc = await collection("festivals").findOne(
+      { contentId, ...regionQuery },
+      { projection: FESTIVAL_DETAIL_PROJECTION },
+    );
+    if (!doc) {
+      devLog("map.pin-detail", { ok: false, kind, contentId, error: "NOT_FOUND" });
+      return res.status(404).json({ ok: false, error: "NOT_FOUND" });
+    }
+    const pin = festivalDetailPin(doc);
+    if (!pin) return res.status(404).json({ ok: false, error: "NOT_FOUND" });
+    const body = { ok: true, pin };
+    devLog("map.pin-detail.perf", {
+      kind,
+      contentId,
+      totalMs: Date.now() - perfStartedAt,
+      payloadBytes: Buffer.byteLength(JSON.stringify(body), "utf8"),
+    });
+    return res.json(body);
+  }
+
+  const doc = await collection("busan_places").findOne(
+    { contentId, ...regionQuery },
+    { projection: PLACE_DETAIL_PROJECTION },
+  );
+  if (!doc) {
+    devLog("map.pin-detail", { ok: false, kind, contentId, error: "NOT_FOUND" });
+    return res.status(404).json({ ok: false, error: "NOT_FOUND" });
+  }
+  const pin = placeDetailPin(doc);
+  if (!pin) return res.status(404).json({ ok: false, error: "NOT_FOUND" });
+  const body = { ok: true, pin };
+  devLog("map.pin-detail.perf", {
+    kind,
+    contentId,
+    totalMs: Date.now() - perfStartedAt,
+    payloadBytes: Buffer.byteLength(JSON.stringify(body), "utf8"),
+  });
+  return res.json(body);
 });

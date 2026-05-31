@@ -3026,6 +3026,29 @@ button.homeLandingCta {
   margin-top: 22px;
 }
 
+/* 일정 인쇄 모달 — 비활성화
+.itineraryPrintModalSpinner {
+  width: 40px;
+  height: 40px;
+  margin: 0 auto 16px;
+  border: 3px solid #e5e7eb;
+  border-top-color: #5b21b6;
+  border-radius: 999px;
+  animation: itineraryPrintSpin 0.75s linear infinite;
+}
+
+@keyframes itineraryPrintSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.mapItineraryDownloadBtn:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+*/
+
 .mapZoomBadge {
   position: absolute;
   right: 18px;

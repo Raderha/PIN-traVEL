@@ -10,6 +10,57 @@ import { isHotelPin, itineraryHomeIconUrl, itineraryStopBadgeHtml, pinForRouteSt
 /** false: `/api/itinerary/schedule-narrative`(Gemini) 호출·AI 일정 요약 UI 비표시 */
 const AI_SCHEDULE_NARRATIVE_ENABLED = false
 
+/* 일정 인쇄(iframe + print dialog) — 비활성화
+const PRINT_PREP_MIN_MS = 350
+
+type PrintModalPhase = 'closed' | 'preparing' | 'ready' | 'error'
+
+function cleanupPrintFrame(frame: HTMLIFrameElement | null) {
+  frame?.remove()
+}
+
+async function preparePrintFrame(html: string): Promise<HTMLIFrameElement> {
+  return new Promise((resolve, reject) => {
+    const iframe = document.createElement('iframe')
+    iframe.setAttribute('aria-hidden', 'true')
+    iframe.style.cssText =
+      'position:fixed;left:-10000px;top:0;width:794px;height:1123px;border:0;visibility:hidden'
+    iframe.onload = () => resolve(iframe)
+    iframe.onerror = () => reject(new Error('LOAD_FAILED'))
+    document.body.appendChild(iframe)
+    iframe.srcdoc = html
+  })
+}
+
+function itineraryPrintDocumentTitle(tripStartDate: string): string {
+  const safe = tripStartDate.replace(/[^\d-]/g, '')
+  return `pintravel-일정-${safe || 'trip'}`
+}
+
+function fitItineraryPrintToSinglePage(doc: Document) {
+  const fit = doc.getElementById('printFit')
+  if (!fit) return
+
+  fit.style.transform = ''
+  fit.style.transformOrigin = ''
+  fit.style.width = ''
+
+  const pageWidthPx = 714
+  const pageHeightPx = 1047
+
+  const contentWidth = fit.scrollWidth
+  const contentHeight = fit.scrollHeight
+  if (contentWidth <= 0 || contentHeight <= 0) return
+
+  const scale = Math.min(1, pageWidthPx / contentWidth, pageHeightPx / contentHeight) * 0.97
+  if (scale >= 0.999) return
+
+  fit.style.transformOrigin = 'top left'
+  fit.style.transform = `scale(${scale})`
+  fit.style.width = `${100 / scale}%`
+}
+*/
+
 function formatDurationKo(ms: number) {
   const m = Math.max(1, Math.round(ms / 60_000))
   if (m < 60) return `${m}분`
@@ -104,6 +155,10 @@ function buildItineraryDownloadHtml(
     )
   }
 
+  // 출발지 Gemini/지오코딩 디버그 — 비활성화
+  const geminiLine = ''
+  const addrLine = ''
+  /*
   const geminiLine = route.departure.geminiRoadAddress
     ? `<p class="sub">Gemini 도로명: ${escapeHtml(route.departure.geminiRoadAddress)}</p>`
     : ''
@@ -111,6 +166,7 @@ function buildItineraryDownloadHtml(
     route.departure.roadAddress || route.departure.jibunAddress
       ? `<p class="sub">${escapeHtml(route.departure.roadAddress ?? route.departure.jibunAddress ?? '')}</p>`
       : ''
+  */
 
   // AI 일정 요약(Gemini) — 비활성화
   const aiBlock = ''
@@ -166,6 +222,20 @@ code { font-size: 11px; font-weight: 800; padding: 1px 6px; border-radius: 4px; 
 .err { margin: 10px 0 0; padding: 10px 12px; border-radius: 8px; background: #fef2f2; border: 1px solid #fecaca; font-size: 12px; font-weight: 650; color: #991b1b; white-space: pre-wrap; word-break: break-word; }
 .gemini { margin-top: 10px; padding: 12px 14px; border-radius: 10px; background: #f9fafb; border: 1px solid #e5e7eb; font-size: 13px; font-weight: 600; color: #1f2937; white-space: pre-wrap; word-break: break-word; }
 .foot { margin: 28px 0 0; font-size: 11px; font-weight: 700; color: #9ca3af; }
+/* 인쇄 1페이지 맞춤 — 비활성화
+@media print {
+  @page { size: A4 portrait; margin: 10mm; }
+  html, body { margin: 0; padding: 0; background: #fff !important; }
+  body { padding: 0; }
+  #printFit { display: block; }
+  .wrap { max-width: none; margin: 0; padding: 0; border-radius: 0; box-shadow: none; }
+  .hint, .foot { display: none !important; }
+  .daySection { margin-top: 0; padding-bottom: 2px; }
+  .dayTitle { margin: 10px 0 6px; font-size: 14px; }
+  .stop { padding: 8px 0; }
+  .leg { margin-bottom: 8px; }
+}
+*/
 `
 
   return `<!DOCTYPE html>
@@ -233,6 +303,8 @@ export function ItineraryRoutePanel({
   const [scheduleLoading, setScheduleLoading] = useState(false)
   const [scheduleError, setScheduleError] = useState<string | null>(null)
   const [geminiOff, setGeminiOff] = useState(!AI_SCHEDULE_NARRATIVE_ENABLED)
+  // const [printModalPhase, setPrintModalPhase] = useState<PrintModalPhase>('closed')
+  // const printFrameRef = useRef<HTMLIFrameElement | null>(null)
 
   const rawDayIndices = useMemo(() => computeStopDayIndicesFromCart(cartDays, tripHotelId), [cartDays, tripHotelId])
   const dayIndices = useMemo(
@@ -347,6 +419,71 @@ export function ItineraryRoutePanel({
     URL.revokeObjectURL(url)
   }
 
+  /* 일정 인쇄(iframe + print dialog) — 비활성화
+  const printDocumentTitle = useMemo(() => itineraryPrintDocumentTitle(tripStartDate), [tripStartDate])
+
+  useEffect(() => {
+    return () => {
+      cleanupPrintFrame(printFrameRef.current)
+      printFrameRef.current = null
+    }
+  }, [])
+
+  function closePrintModal() {
+    setPrintModalPhase('closed')
+    cleanupPrintFrame(printFrameRef.current)
+    printFrameRef.current = null
+  }
+
+  async function onStartPrintFlow() {
+    if (printModalPhase === 'preparing') return
+    setPrintModalPhase('preparing')
+    cleanupPrintFrame(printFrameRef.current)
+    printFrameRef.current = null
+
+    const html = buildItineraryDownloadHtml(
+      tripStartDate,
+      route,
+      dayIndices,
+      cartDays,
+      tripHotelId,
+      {
+        scheduleText: displayNarrative.text,
+        scheduleLoading: displayNarrative.loading,
+        scheduleError: displayNarrative.error,
+        geminiOff: displayNarrative.geminiOff,
+      },
+      printDocumentTitle,
+    )
+
+    const startedAt = Date.now()
+    try {
+      const iframe = await preparePrintFrame(html)
+      const elapsed = Date.now() - startedAt
+      if (elapsed < PRINT_PREP_MIN_MS) {
+        await new Promise((r) => window.setTimeout(r, PRINT_PREP_MIN_MS - elapsed))
+      }
+      printFrameRef.current = iframe
+      setPrintModalPhase('ready')
+    } catch {
+      setPrintModalPhase('error')
+    }
+  }
+
+  function onConfirmPrint() {
+    const win = printFrameRef.current?.contentWindow
+    const doc = printFrameRef.current?.contentDocument
+    if (!win || !doc) {
+      setPrintModalPhase('error')
+      return
+    }
+    fitItineraryPrintToSinglePage(doc)
+    win.focus()
+    win.print()
+    closePrintModal()
+  }
+  */
+
   const dayChipList = useMemo(() => {
     const out: Array<number | 'all'> = ['all']
     for (let d = 0; d <= maxDay; d++) out.push(d)
@@ -395,12 +532,14 @@ export function ItineraryRoutePanel({
         <p className="mapItineraryMeta">
           출발지: <strong>{route.departure.query}</strong>
         </p>
+        {/* 출발지 Gemini/지오코딩 디버그 — 비활성화
         {route.departure.geminiRoadAddress ? (
           <p className="mapItinerarySub">Gemini 도로명: {route.departure.geminiRoadAddress}</p>
         ) : null}
         {(route.departure.roadAddress || route.departure.jibunAddress) && (
           <p className="mapItinerarySub">{route.departure.roadAddress ?? route.departure.jibunAddress}</p>
         )}
+        */}
         <p className="mapItinerarySummaryLine">
           총 거리 {formatDistanceKo(route.totalDistanceM)} · 차량 이동 약 {formatDurationKo(route.totalDurationMs)}
         </p>
@@ -509,6 +648,15 @@ export function ItineraryRoutePanel({
       </div>
     </>
   )
+
+  /* 일정 인쇄 모달 — 비활성화
+  const printModal =
+    printModalPhase !== 'closed' ? (
+      <div className="itineraryModalRoot">
+        ...
+      </div>
+    ) : null
+  */
 
   if (embedded) {
     return <div className="mapItineraryEmbed">{itineraryMain}</div>

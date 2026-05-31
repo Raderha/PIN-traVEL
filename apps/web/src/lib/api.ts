@@ -171,6 +171,22 @@ export function fetchMapSummaryPins(
   return getJson<SummaryPinsResponse>(`/api/map/summary-pins?${qs.toString()}`, signal)
 }
 
+export type MapPinDetailResponse = { ok: true; pin: SummaryPin }
+
+/** 지도 핀 클릭 후 상세 패널 — overview·이미지·연락처 등 */
+export function fetchMapPinDetail(
+  kind: 'festival' | 'tour',
+  contentId: string,
+  params?: { region?: 'busan' },
+  signal?: AbortSignal,
+) {
+  const qs = new URLSearchParams({ region: params?.region ?? 'busan' })
+  return getJson<MapPinDetailResponse>(
+    `/api/map/pins/${kind}/${encodeURIComponent(contentId)}?${qs.toString()}`,
+    signal,
+  )
+}
+
 export function fetchNearbyAiRecommendations(
   params: { lat: number; lng: number; limit?: number },
   signal?: AbortSignal,

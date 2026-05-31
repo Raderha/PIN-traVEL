@@ -18,6 +18,7 @@ import { ItineraryRoutePanel } from '../components/ItineraryRoutePanel'
 import { ItineraryScheduleModal, type ItineraryScheduleConfirmPayload } from '../components/ItineraryScheduleModal'
 import {
   fetchMapSummaryPins,
+  fetchMapPinDetail,
   fetchNearbyAiRecommendations,
   postItineraryRoute,
   postScheduleConfirm,
@@ -29,6 +30,7 @@ import {
 } from '../lib/api'
 import { concatPathSegments, itineraryDayColor, legIndicesForStopDay } from '../lib/itineraryPaths'
 import { computeStopDayIndicesFromCart, flattenCartPinsWithLocation } from '../lib/itineraryStopDays'
+import { estimateJsonBytes, mapPerfLog } from '../lib/mapPerfLog'
 import { isHotelPin, itineraryHotelMarkerHtml, pinForRouteStopOrder } from '../lib/pinHotel'
 import { copyTextToClipboard } from '../lib/copyToClipboard'
 import { buildNcpMapLanAuthHint, ncpWebUrlPatternsForOrigin } from '../lib/networkHost'
@@ -598,6 +600,10 @@ export function MapPage() {
   const recommendationMarkerListenersRef = useRef<NaverEventListener[]>([])
   const [summaryPins, setSummaryPins] = useState<SummaryPin[]>([])
   const [selectedPin, setSelectedPin] = useState<SummaryPin | null>(null)
+  const [selectedPinDetail, setSelectedPinDetail] = useState<SummaryPin | null>(null)
+  const [pinDetailLoading, setPinDetailLoading] = useState(false)
+  const [pinDetailError, setPinDetailError] = useState<string | null>(null)
+  const pinDetailCacheRef = useRef(new Map<string, SummaryPin>())
   const [overlapPinIndexes, setOverlapPinIndexes] = useState<Record<string, number>>({})
   const [cartDays, setCartDays] = useState<SummaryPin[][]>(() => loadStoredCartDays())
   /** 여러 일차 맨 끝에 자동 배치되는 숙소(다른 숙소를 담으면 교체) */
@@ -611,7 +617,7 @@ export function MapPage() {
   const [filterViewMonth, setFilterViewMonth] = useState(() => createDefaultFestivalFilterState().viewMonth)
   const [filterRange, setFilterRange] = useState(() => createDefaultFestivalFilterState().range)
   const [mapReady, setMapReady] = useState(false)
-  const [zoomLevel, setZoomLevel] = useState<number | null>(null)
+  // const [zoomLevel, setZoomLevel] = useState<number | null>(null)
   const [aiRecommendations, setAiRecommendations] = useState<AiRecommendationsResponse | null>(null)
   const [aiRecommendationPinId, setAiRecommendationPinId] = useState<string | null>(null)
   const [aiRecommendationLoading, setAiRecommendationLoading] = useState(false)
@@ -700,6 +706,15 @@ export function MapPage() {
     return summaryPins.filter((pin) => selectedCategories.includes(categoryForPin(pin)))
   }, [selectedCategories, summaryPins])
 
+  useEffect(() => {
+    if (summaryPins.length === 0) return
+    mapPerfLog('summary-pins.state', {
+      pinCount: summaryPins.length,
+      filteredPinCount: filteredSummaryPins.length,
+      selectedCategories,
+    })
+  }, [summaryPins, filteredSummaryPins, selectedCategories])
+
   function readAuthToken() {
     return typeof window !== 'undefined' ? localStorage.getItem('pintravel_token') : null
   }
@@ -785,7 +800,63 @@ export function MapPage() {
   }, [selectedPin?.id])
 
   useEffect(() => {
+    if (!selectedPin) {
+      setSelectedPinDetail(null)
+      setPinDetailLoading(false)
+      setPinDetailError(null)
+      return
+    }
+
+    const cached = pinDetailCacheRef.current.get(selectedPin.id)
+    if (cached) {
+      setSelectedPinDetail(cached)
+      setPinDetailLoading(false)
+      setPinDetailError(null)
+      return
+    }
+
     const ac = new AbortController()
+    setSelectedPinDetail(null)
+    setPinDetailLoading(true)
+    setPinDetailError(null)
+
+    const detailStartedAt = performance.now()
+    fetchMapPinDetail(selectedPin.kind, selectedPin.contentId, { region: 'busan' }, ac.signal)
+      .then((r) => {
+        if (ac.signal.aborted) return
+        pinDetailCacheRef.current.set(selectedPin.id, r.pin)
+        setSelectedPinDetail(r.pin)
+        mapPerfLog('pin-detail.fetch.done', {
+          pinId: selectedPin.id,
+          fetchMs: Math.round(performance.now() - detailStartedAt),
+          payloadBytes: estimateJsonBytes(r),
+        })
+      })
+      .catch((err: unknown) => {
+        if (ac.signal.aborted) return
+        if (err instanceof DOMException && err.name === 'AbortError') return
+        setPinDetailError('상세 정보를 불러오지 못했어요.')
+        mapPerfLog('pin-detail.fetch.error', {
+          pinId: selectedPin.id,
+          fetchMs: Math.round(performance.now() - detailStartedAt),
+        })
+      })
+      .finally(() => {
+        if (!ac.signal.aborted) setPinDetailLoading(false)
+      })
+
+    return () => ac.abort()
+  }, [selectedPin?.id, selectedPin?.kind, selectedPin?.contentId])
+
+  useEffect(() => {
+    const ac = new AbortController()
+    const fetchStartedAt = performance.now()
+    mapPerfLog('summary-pins.fetch.start', {
+      kind: 'all',
+      region: 'busan',
+      festivalFilterEnabled,
+      filterRange,
+    })
     fetchMapSummaryPins(
       {
         kind: 'all',
@@ -795,10 +866,23 @@ export function MapPage() {
       ac.signal,
     )
       .then((r) => {
-        if (!ac.signal.aborted) setSummaryPins(r.pins)
+        if (ac.signal.aborted) return
+        const fetchMs = Math.round(performance.now() - fetchStartedAt)
+        mapPerfLog('summary-pins.fetch.done', {
+          fetchMs,
+          pinCount: r.pins.length,
+          payloadBytes: estimateJsonBytes(r),
+          payloadKb: Math.round((estimateJsonBytes(r) / 1024) * 10) / 10,
+        })
+        setSummaryPins(r.pins)
       })
       .catch(() => {
-        if (!ac.signal.aborted) setError('지도 핀 정보를 불러오지 못했어요.')
+        if (!ac.signal.aborted) {
+          mapPerfLog('summary-pins.fetch.error', {
+            fetchMs: Math.round(performance.now() - fetchStartedAt),
+          })
+          setError('지도 핀 정보를 불러오지 못했어요.')
+        }
       })
     return () => ac.abort()
   }, [festivalFilterEnabled, filterRange])
@@ -938,7 +1022,7 @@ export function MapPage() {
   }
 
   function addSelectedPinToCart() {
-    const pin = selectedPin
+    const pin = selectedPinDetail ?? selectedPin
     if (!pin) return
     if (!readAuthToken()) {
       requireLogin()
@@ -1051,7 +1135,7 @@ export function MapPage() {
   }
 
   function renderSelectedPinDetailBlocks() {
-    const pin = selectedPin
+    const pin = selectedPinDetail ?? selectedPin
     if (!pin) return null
     return (
       <>
@@ -1067,7 +1151,7 @@ export function MapPage() {
           <dl className="mapDetailInfo">
             <div>
               <dt>주소</dt>
-              <dd>{addressText(pin)}</dd>
+              <dd>{pinDetailLoading && !pin.address ? '불러오는 중…' : addressText(pin)}</dd>
             </div>
             {pin.zipcode ? (
               <div>
@@ -1095,10 +1179,16 @@ export function MapPage() {
             </div>
             <div>
               <dt>문의</dt>
-              <dd>{contactText(pin)}</dd>
+              <dd>{pinDetailLoading && !pin.tel && !pin.infoCenter ? '불러오는 중…' : contactText(pin)}</dd>
             </div>
           </dl>
-          <p className="mapDetailOverview">{overviewText(pin)}</p>
+          {pinDetailError ? (
+            <p className="mapDetailOverview mapDetailOverview--error">{pinDetailError}</p>
+          ) : pinDetailLoading && !pin.overview ? (
+            <p className="mapDetailOverview">상세 설명을 불러오는 중…</p>
+          ) : (
+            <p className="mapDetailOverview">{overviewText(pin)}</p>
+          )}
           <button type="button" onClick={addSelectedPinToCart}>
             {cartPins.some((p) => p.id === pin.id) ? '담긴 장소' : '장소 담기'}
           </button>
@@ -1346,22 +1436,49 @@ export function MapPage() {
       return filteredSummaryPins.filter((pin) => bounds.hasLatLng(new maps.LatLng(pin.location.lat, pin.location.lng)))
     }
 
-    function renderMarkers() {
+    function renderMarkers(trigger: string) {
+      const renderStartedAt = performance.now()
       clearMarkers()
+      const clearMs = Math.round(performance.now() - renderStartedAt)
       const zoom = mapInstance.getZoom()
-      setZoomLevel(zoom)
-      console.log('[PinTravel map] zoom level:', zoom)
       /** 기본: 경로·번호 마커만. 장소 핀 ON이면 요약 핀·클러스터도 표시 */
       if (
         itineraryRoute != null &&
         itineraryRoute.path.length > 0 &&
         !itinerarySummaryPinsOn
       ) {
+        mapPerfLog('markers.render.skip', {
+          trigger,
+          reason: 'itinerary_route',
+          zoom,
+          filteredPinCount: filteredSummaryPins.length,
+          clearMs,
+          totalMs: Math.round(performance.now() - renderStartedAt),
+        })
         return
       }
 
+      const visibleStartedAt = performance.now()
       const pinsInView = visiblePins()
-      if (pinsInView.length === 0) return
+      const visibleMs = Math.round(performance.now() - visibleStartedAt)
+
+      if (pinsInView.length === 0) {
+        mapPerfLog('markers.render.empty', {
+          trigger,
+          zoom,
+          filteredPinCount: filteredSummaryPins.length,
+          pinsInView: 0,
+          clearMs,
+          visibleMs,
+          totalMs: Math.round(performance.now() - renderStartedAt),
+        })
+        return
+      }
+
+      let markerCount = 0
+      let summaryPinMarkers = 0
+      let clusterMarkers = 0
+      let renderMode: 'unlock' | 'cluster' = 'cluster'
 
       const bringMarkerToFront = (marker: NaverMarkerInstance, baseZ: number) => {
         if (!marker.setZIndex) return
@@ -1372,6 +1489,7 @@ export function MapPage() {
       }
 
       if (zoom >= CLUSTER_UNLOCK_ZOOM) {
+        renderMode = 'unlock'
         groupPinsForTabbedDisplay(pinsInView).forEach(({ groupKey, pins, location }) => {
           const activeIndex = Math.min(Math.max(overlapPinIndexes[groupKey] ?? 0, 0), pins.length - 1)
           const pin = pins[activeIndex]
@@ -1391,6 +1509,8 @@ export function MapPage() {
             },
           })
           markersRef.current.push(marker)
+          markerCount += 1
+          summaryPinMarkers += 1
           markerByOverlapGroupRef.current.set(groupKey, marker)
           markerByPinIdRef.current.set(pin.id, marker)
           markerListenersRef.current.push(
@@ -1399,6 +1519,19 @@ export function MapPage() {
               setSelectedPin(pin)
             }),
           )
+        })
+        mapPerfLog('markers.render.done', {
+          trigger,
+          renderMode,
+          zoom,
+          filteredPinCount: filteredSummaryPins.length,
+          pinsInView: pinsInView.length,
+          markerCount,
+          summaryPinMarkers,
+          clusterMarkers,
+          clearMs,
+          visibleMs,
+          totalMs: Math.round(performance.now() - renderStartedAt),
         })
         return
       }
@@ -1421,6 +1554,8 @@ export function MapPage() {
               },
             })
             markersRef.current.push(marker)
+            markerCount += 1
+            summaryPinMarkers += 1
             markerByPinIdRef.current.set(pin.id, marker)
             markerListenersRef.current.push(
               maps.Event.addListener(marker, 'click', () => {
@@ -1445,6 +1580,8 @@ export function MapPage() {
               },
             }),
           )
+          markerCount += 1
+          clusterMarkers += 1
           return
         }
 
@@ -1461,6 +1598,8 @@ export function MapPage() {
           },
         })
         markersRef.current.push(marker)
+        markerCount += 1
+        summaryPinMarkers += 1
         markerByPinIdRef.current.set(pin.id, marker)
         markerListenersRef.current.push(
           maps.Event.addListener(marker, 'click', () => {
@@ -1469,15 +1608,30 @@ export function MapPage() {
           }),
         )
       })
+
+      mapPerfLog('markers.render.done', {
+        trigger,
+        renderMode,
+        zoom,
+        clusterCount: clusters.length,
+        filteredPinCount: filteredSummaryPins.length,
+        pinsInView: pinsInView.length,
+        markerCount,
+        summaryPinMarkers,
+        clusterMarkers,
+        clearMs,
+        visibleMs,
+        totalMs: Math.round(performance.now() - renderStartedAt),
+      })
     }
 
     mapListenersRef.current.forEach((listener) => maps.Event.removeListener(listener))
     mapListenersRef.current = [
-      maps.Event.addListener(mapInstance, 'zoom_changed', renderMarkers),
-      maps.Event.addListener(mapInstance, 'dragend', renderMarkers),
-      maps.Event.addListener(mapInstance, 'idle', renderMarkers),
+      maps.Event.addListener(mapInstance, 'zoom_changed', () => renderMarkers('zoom_changed')),
+      maps.Event.addListener(mapInstance, 'dragend', () => renderMarkers('dragend')),
+      maps.Event.addListener(mapInstance, 'idle', () => renderMarkers('idle')),
     ]
-    renderMarkers()
+    renderMarkers('init')
 
     return () => {
       mapListenersRef.current.forEach((listener) => maps.Event.removeListener(listener))
@@ -1858,9 +2012,11 @@ export function MapPage() {
         </aside>
       ) : null}
 
+      {/* 줌 레벨 디버그 — 비활성화
       <div className="mapZoomBadge" aria-live="polite">
         줌 레벨: {zoomLevel ?? '-'}
       </div>
+      */}
 
       {selectedPin && !itineraryRoute ? (
         <aside className="mapDetailPanel" aria-label="상세 정보">
