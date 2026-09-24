@@ -10,11 +10,13 @@
     "lint": "node -e \"console.log('no lint configured yet')\""
   },
   "dependencies": {
+    "@aws-sdk/client-ssm": "^3.901.0",
     "@google/genai": "^2.2.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "mongodb": "^6.19.0",
+    "serverless-http": "^3.2.0",
     "nanoid": "^5.0.7",
     "socket.io": "^4.7.5",
     "zod": "^3.23.8"

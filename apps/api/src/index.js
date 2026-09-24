@@ -1,19 +1,13 @@
 /**
  * 담당 유스케이스: UC1(로그인), UC2(회원가입), UC3(로그아웃), UC4(지도 기반 조회), UC5(일정 생성), UC6(텍스트 파일 생성),
  *                UC7(동시 협업 세션), UC8(축제 달력)
- * 역할: Express 앱/HTTP 서버 부팅, 공통 미들웨어 설정, REST 라우트/Socket.IO 실시간 서버 연결
+ * 역할: 로컬/상시 프로세스 HTTP 서버 부팅, REST + Socket.IO
  */
 import http from "http";
-import express from "express";
-import cors from "cors";
-import dotenv from "dotenv";
-import { existsSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 
-import { registerRoutes } from "./routes/index.js";
+import { createApp } from "./app.js";
+import { loadLocalEnv } from "./config/loadLocalEnv.js";
 import { attachSocketServer } from "./realtime/socket.js";
-import { corsOriginCallback } from "./security/corsOrigins.js";
 import {
   ensureCollabSessionsIndexes,
   flushAllCachedCollabSessions,
@@ -22,14 +16,12 @@ import {
 } from "./storage/collabSessions.js";
 import { closeMongo, connectMongo } from "./storage/mongo.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-/** cwd와 무관하게 `apps/api/.env`를 우선 로드한 뒤, cwd의 `.env`로 보완 */
-const pkgEnvPath = path.resolve(__dirname, "../.env");
-dotenv.config({ path: pkgEnvPath });
-dotenv.config();
+const { pkgEnvPath, found } = loadLocalEnv();
 
 if (process.env.NODE_ENV !== "production") {
-  console.log(`[api] dotenv: package=${pkgEnvPath} (${existsSync(pkgEnvPath) ? "found" : "missing"}) cwd=${process.cwd()}`);
+  console.log(
+    `[api] dotenv: package=${pkgEnvPath} (${found ? "found" : "missing"}) cwd=${process.cwd()}`,
+  );
 }
 
 async function main() {
@@ -39,21 +31,7 @@ async function main() {
   await ensureCollabSessionsIndexes();
   startCollabSessionPersistence();
 
-  const app = express();
-  app.use(express.json({ limit: "1mb" }));
-  app.use(
-    cors({
-      origin: corsOriginCallback,
-      credentials: true,
-    })
-  );
-
-  app.get("/health", (req, res) => {
-    res.json({ ok: true, service: "pintravel-api" });
-  });
-
-  registerRoutes(app);
-
+  const app = createApp();
   const server = http.createServer(app);
   attachSocketServer(server);
 
@@ -82,4 +60,3 @@ main().catch((err) => {
   console.error("[api] failed to start:", err);
   process.exit(1);
 });
-

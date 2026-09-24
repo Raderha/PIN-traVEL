@@ -1,0 +1,62 @@
+name: Deploy AWS
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "apps/**"
+      - "infra/aws/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/deploy-aws.yml"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ap-northeast-2
+      STACK_NAME: pintravel-prod
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: SAM build
+        working-directory: infra/aws
+        run: sam build
+
+      - name: SAM deploy
+        working-directory: infra/aws
+        run: sam deploy --no-confirm-changeset --no-fail-on-empty-changeset --no-progressbar
+
+      - name: Install and build web
+        env:
+          VITE_X_NCP_APIGW_API_KEY_ID: ${{ secrets.VITE_X_NCP_APIGW_API_KEY_ID }}
+        run: |
+          npm ci
+          npm run build -w web
+
+      - name: Sync S3 and invalidate CloudFront
+        run: |
+          BUCKET=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query "Stacks[0].Outputs[?OutputKey=='WebBucketName'].OutputValue" --output text)
+          DIST=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query "Stacks[0].Outputs[?OutputKey=='DistributionId'].OutputValue" --output text)
+          aws s3 sync apps/web/dist "s3://${BUCKET}" --delete
+          aws cloudfront create-invalidation --distribution-id "$DIST" --paths "/*"
+          aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query "Stacks[0].Outputs[?OutputKey=='CloudFrontUrl'].OutputValue" --output text

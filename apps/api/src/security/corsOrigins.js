@@ -5,10 +5,13 @@ export function parseWebOrigins() {
 }
 
 const DEV_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1|\d{1,3}(?:\.\d{1,3}){3})(:\d+)?$/;
+/** 커스텀 도메인 전에 CloudFront 기본 도메인으로 접속할 때 */
+const CLOUDFRONT_ORIGIN_RE = /^https:\/\/[a-z0-9]+\.cloudfront\.net$/i;
 
 export function isCorsOriginAllowed(origin) {
   if (!origin) return true;
   if (parseWebOrigins().includes(origin)) return true;
+  if (process.env.NODE_ENV === "production" && CLOUDFRONT_ORIGIN_RE.test(origin)) return true;
   if (process.env.NODE_ENV !== "production" && DEV_ORIGIN_RE.test(origin)) return true;
   return false;
 }

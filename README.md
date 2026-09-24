@@ -222,6 +222,20 @@ PIN-traVEL/
 
 
 
+## AWS 배포 (실습)
+
+
+
+서버리스 1차 스택(S3 + CloudFront + API Gateway + Lambda, MongoDB Atlas, SSM)은 **[docs/deploy-aws.md](docs/deploy-aws.md)** 를 따릅니다. 계획부터 검증까지는 **[docs/aws-deploy-report.md](docs/aws-deploy-report.md)** 입니다.
+
+
+
+- 인프라: [infra/aws/template.yaml](infra/aws/template.yaml) (`sam build` / `sam deploy`)
+
+- Socket.IO 협업은 클라우드 1차에 **포함하지 않습니다** (로컬 API는 기존과 같음)
+
+
+
 ## npm 스크립트 (루트)
 
 

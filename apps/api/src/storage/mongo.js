@@ -38,7 +38,11 @@ export async function connectMongo() {
 
   const effectiveUri = withCredentialsIfNeeded(uri);
 
-  client = new MongoClient(effectiveUri);
+  // Lambda: 모듈 스코프 클라이언트를 콜드 스타트 이후 재사용 (maxPoolSize는 동시성 대비 작게)
+  client = new MongoClient(effectiveUri, {
+    maxPoolSize: process.env.AWS_LAMBDA_FUNCTION_NAME ? 5 : 10,
+    serverSelectionTimeoutMS: 8000,
+  });
   await client.connect();
   db = client.db(getDbNameFromUri(effectiveUri));
 
