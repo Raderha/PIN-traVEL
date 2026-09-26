@@ -1,259 +1,121 @@
 # 핀블(PIN-traVEL)
 
-
-
 2026 캡스톤디자인 개발 6팀 저장소입니다.
 
-
-
 - 팀명: 개발 6팀
-
 - 구성: **npm workspaces** 모노레포 — `apps/web`(프론트) · `apps/api`(백엔드 API)
+- 클라우드(1차): S3 + CloudFront + API Gateway + Lambda, MongoDB Atlas, SSM. 재현은 [docs/deploy-aws.md](docs/deploy-aws.md), 실습 완료 기록은 [docs/aws-deploy-report.md](docs/aws-deploy-report.md).
 
+배포된 HTTPS 사이트(서울 `pintravel-prod`): `https://dm0kbipnsg1gx.cloudfront.net`  
+(`GET /health` → `{ "ok": true, "service": "pintravel-api" }`)
 
+---
 
 ## 저장소 구조
 
-
-
 ```
-
 PIN-traVEL/
-
-  package.json              - 루트 워크스페이스, 공통 npm 스크립트
-
+  package.json                 루트 워크스페이스, 공통 npm 스크립트
+  docs/
+    deploy-aws.md              AWS 재현·운영 가이드
+    aws-deploy-report.md       배포 실습 완료 보고서
+  infra/aws/                   SAM 템플릿, samconfig, GitHub OIDC
+  .github/workflows/
+    deploy-aws.yml             main 푸시·수동 실행 시 SAM + 프론트 배포 (OIDC)
   apps/
-
-    api/                    - Node.js(Express) REST API + Socket.IO
-
-      .env.example          - 서버 환경 변수 예시 (`apps/api/.env`로 복사)
-
-      package.json          - 패키지명: @pintravel/api
-
+    api/                       Node.js(Express) REST API + Socket.IO(로컬)
+      .env.example
+      Makefile                 sam build용 Lambda 패키징
       src/
-
-        index.js            - HTTP 서버 부팅, MongoDB 연결, CORS, 라우트/Socket 마운트
-
-        routes/
-
-          index.js          - `/api/*` 기능 라우터 등록
-
-          modules/
-
-            auth.js          - UC1~3 인증(회원가입·로그인·로그아웃 등)
-
-            airecommand.js   - AI 추천 등 `/api/airecommand`
-
-            map.js           - UC4 지도 관련 조회 등 `/api/map`
-
-            festivals.js     - UC8 축제·기간 등 `/api/festivals`
-
-            itinerary.js     - UC5~6 일정 생성·내보내기 등 `/api/itinerary`
-
-            sessions.js      - UC7 협업 세션 등 `/api/sessions`
-
-        realtime/
-
-          socket.js         - UC7 실시간 동기화(Socket.IO)
-
-        security/
-
-          auth.js           - Bearer 토큰 등 검증
-
-          passwords.js      - 비밀번호 scrypt 해시/검증
-
-        services/
-
-          itineraryText.js  - UC6 파일명·텍스트 구성
-
-        storage/
-
-          mongo.js          - MongoDB 연결
-
-          memory.js         - 개발용 인메모리 저장소·샘플 데이터
-
-        scripts/
-
-          syncTourApiRaw.js 
-
-          buildServiceCollections.js
-
-          syncBusanHotelFood.js
-
-    web/                    - React + TypeScript + Vite
-
-      package.json          - 패키지명: web
-
-      vite.config.ts
-
-      index.html
-
-      src/
-
-        main.tsx
-
-        App.tsx             - 라우팅·경로별 상단바(MapNavBar / NavBar / 랜딩 헤더 래퍼)
-
-        pages/               - HomePage, FestivalCalendarPage, MapPage, LoginPage, SignupPage
-
-        components/
-
-          NavBar.tsx         - 일반 페이지용 네비
-
-          HomeLandingHeader.tsx - 랜딩형 상단 메뉴(홈 페이지 본문·로그인/회원가입 상단에 사용)
-
-        lib/
-
-          api.ts             - API 클라이언트 헬퍼
-
-          clearPintravelStorage.ts
-
-        assets/              - 아이콘·히어로·핀 등 이미지 자산
-
-        index.css, App.css
-
+        app.js                 Express 앱 팩토리 (listen 없음)
+        index.js               로컬 HTTP + Socket.IO
+        lambda.js              AWS Lambda 핸들러 (REST만)
+        config/                로컬 .env / SSM 로드
+        routes/modules/        auth, map, festivals, itinerary, schedule, sessions, airecommand
+        realtime/socket.js     UC7 실시간 (로컬만)
+        storage/mongo.js       MongoDB
+        scripts/               TourAPI sync, 서비스 컬렉션 빌드
+    web/                       React + TypeScript + Vite
 ```
 
-
+---
 
 ## 프론트 라우팅·상단바
 
-
-
 | 경로 | 페이지 | 상단 UI |
-
 |------|--------|---------|
-
-| `/` | `HomePage` | 앱 레이아웃의 `NavBar` 없음 · 페이지 안에 `HomeLandingHeader` 포함 |
-
-| `/calendar` | `FestivalCalendarPage` | 전역 `NavBar` 미사용(페이지 자체 레이아웃) |
-
+| `/` | `HomePage` | 전역 네비 없음 · 페이지 안 `HomeLandingHeader` |
+| `/calendar` | `FestivalCalendarPage` | 전역 `NavBar` 없음 |
 | `/map` | `MapPage` | `MapNavBar` |
+| `/mypage` | `MyPage` | 전역 `NavBar` 없음 (페이지 자체 레이아웃) |
+| `/login`, `/signup` | `LoginPage`, `SignupPage` | `HomeLandingHeader` |
+| 그 외 | `/`로 리다이렉트 | |
 
-| `/login`, `/signup` | `LoginPage`, `SignupPage` | `HomeLandingHeader`가 감싸는 형태 |
+지도는 **네이버 지도(Open API)**. 로컬에서 보려면 `apps/web/.env`에:
 
-| 그 외 | 리다이렉트(`/`) 등 | 현재 라우트 집합에서는 `NavBar`가 필요한 다른 경로는 없음 |
+- **`VITE_X_NCP_APIGW_API_KEY_ID`** — Maps API Gateway 키 ID (Client Secret은 프론트에 넣지 않음; 일정 경로는 API `.env` / SSM)
 
-
-
-지도 페이지는 **네이버 지도(Open API)** 를 쓰며, 워크스페이스 루트나 `apps/web`에 다음 환경 변수를 두면 됩니다.
-
-
-
-- **`VITE_X_NCP_APIGW_API_KEY_ID`** — NCloud Maps API Gateway 키 ID
-
-
+---
 
 ## 기술 스택
 
-
-
 | 구분 | 사용 |
-
 |------|------|
-
 | 프론트엔드 | React 19, TypeScript, Vite, React Router |
+| 백엔드 | Node.js(ESM), Express, Zod |
+| 실시간 | Socket.IO (로컬 API). 클라우드 1차에는 없음 |
+| 데이터 | MongoDB (`storage/mongo.js`). 프로덕션은 Atlas |
+| 배포 | AWS SAM, CloudFront, S3, HTTP API, Lambda, SSM |
 
-| 백엔드 | Node.js(ESM), Express |
+세션 저장용 Redis는 코드베이스에 없습니다.
 
-| 검증 | Zod(api) |
-
-| 실시간 | Socket.IO |
-
-| 데이터 | MongoDB(연결: `storage/mongo.js`) |
-
-
-
-> 세션 저장용 Redis 등은 코드베이스에 아직 포함되어 있지 않습니다. 필요 시 별도 도입·문서화 예정입니다.
-
-
+---
 
 ## 사전 요구 사항
 
+- Node.js 20+ (npm 포함)
+- 로컬 또는 원격 **MongoDB** — API에 `MONGODB_URI` 필수
 
-
-- Node.js(npm 포함)
-
-- 로컬 또는 원격 **MongoDB** — API 기동에 `MONGODB_URI` 필수
-
-
+---
 
 ## 실행 방법
 
+저장소 루트에서:
 
+1. `npm install`
 
-저장소 루트(`PIN-traVEL/`)에서:
+2. API 환경 변수: `apps/api/.env.example`을 `apps/api/.env`로 복사한 뒤 최소 **`MONGODB_URI`**.  
+   (선택) `MONGODB_USERNAME`, `MONGODB_PASSWORD`, `MONGODB_AUTH_SOURCE` — URI에 자격이 없을 때.  
+   기타: `PORT`(4000), `WEB_ORIGIN`(`http://localhost:5173`), `JWT_SECRET`, NCP Key ID/Secret, Gemini 키.
 
-
-
-1. 의존성 설치  
-
-   `npm install`
-
-
-
-2. API 환경 변수  
-
-   `apps/api/.env.example`을 `apps/api/.env`로 복사한 뒤, 최소 **`MONGODB_URI`** 를 설정합니다.  
-
-   (선택) `MONGODB_USERNAME`, `MONGODB_PASSWORD`, `MONGODB_AUTH_SOURCE` — URI에 자격 증명이 없을 때 사용합니다.  
-
-   기타: `PORT`(기본 4000), `WEB_ORIGIN`(기본 `http://localhost:5173`), `JWT_SECRET`(예시 파일 참고)
-
-
-
-3. 웹(선택)·지도  
-
-   로컬에서 지도 기능을 보려면 `apps/web/.env`(또는 루트에서 Vite가 읽는 위치)에 `VITE_X_NCP_APIGW_API_KEY_ID` 설정
-
-
+3. 지도: `apps/web/.env`에 `VITE_X_NCP_APIGW_API_KEY_ID`.
 
 4. 개발 서버  
+   - API: `npm run dev:api` → `http://localhost:4000` (`GET /health`)  
+   - 웹: `npm run dev:web` → `http://localhost:5173` (Vite가 `/api`, `/socket.io`를 API로 프록시)
 
-   - API만: `npm run dev:api`  
+---
 
-   - 웹만: `npm run dev:web`  
+## AWS 배포
 
+서버리스 1차(REST: 인증, 지도, 축제, 일정, 마이페이지)는 배포·검증까지 완료했습니다. Socket.IO 협업(UC7)은 Lambda와 맞지 않아 **클라우드에 포함하지 않습니다.** 로컬 `npm run dev:api`에서는 기존처럼 동작합니다.
 
-
-- API 기본 주소: `http://localhost:4000` — 헬스 체크: `GET /health`  
-
-- 웹(Vite) 기본 주소: `http://localhost:5173`
-
-
-
-## AWS 배포 (실습)
-
-
-
-서버리스 1차 스택(S3 + CloudFront + API Gateway + Lambda, MongoDB Atlas, SSM)은 **[docs/deploy-aws.md](docs/deploy-aws.md)** 를 따릅니다. 계획부터 검증까지는 **[docs/aws-deploy-report.md](docs/aws-deploy-report.md)** 입니다.
-
-
-
+- 재현 절차: [docs/deploy-aws.md](docs/deploy-aws.md)
+- 계획 대비 이슈·검증: [docs/aws-deploy-report.md](docs/aws-deploy-report.md)
 - 인프라: [infra/aws/template.yaml](infra/aws/template.yaml) (`sam build` / `sam deploy`)
+- GitHub Actions: [`.github/workflows/deploy-aws.yml`](.github/workflows/deploy-aws.yml) — 시크릿 `AWS_ROLE_ARN`, `VITE_X_NCP_APIGW_API_KEY_ID`. OIDC 역할은 아직 안 켠 경우 수동 배포와 동일하게 `sam deploy` + S3 sync.
 
-- Socket.IO 협업은 클라우드 1차에 **포함하지 않습니다** (로컬 API는 기존과 같음)
+프로덕션 시크릿은 Git이 아니라 **SSM** `/pintravel/prod/*` 입니다.
 
-
+---
 
 ## npm 스크립트 (루트)
 
-
-
 | 스크립트 | 설명 |
-
 |----------|------|
-
-| `npm run dev` | api + web 개발 서버(환경에 따라 동작 방식이 다를 수 있음) |
-
+| `npm run dev` | api + web (환경에 따라 `&` 동작이 다를 수 있음) |
 | `npm run dev:api` | `@pintravel/api`만 |
+| `npm run dev:web` | `web`만 |
+| `npm run lint` | 워크스페이스 lint |
 
-| `npm run dev:web` | `web` 워크스페이스만 |
-
-| `npm run lint` | 워크스페이스 전체 lint |
-
-
-
-API 패키지 전용: `apps/api`에서 `npm run sync:tourapi:raw` 등(`package.json` 참고).
-
-
+API: `apps/api`에서 `npm run sync:tourapi:raw`, `npm run sync:busan:hotel-food` 등 (`package.json` 참고).

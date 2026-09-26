@@ -66,6 +66,8 @@ flowchart LR
 | [`infra/aws/github-oidc.yaml`](../infra/aws/github-oidc.yaml) | GitHub Actions OIDC 역할 (선택) |
 | [`.github/workflows/deploy-aws.yml`](../.github/workflows/deploy-aws.yml) | `sam deploy` + S3 sync + 무효화 |
 | [`docs/deploy-aws.md`](./deploy-aws.md) | 운영·재현 가이드 |
+| [`docs/aws-deploy-report.md`](./aws-deploy-report.md) | 이 완료 보고서 |
+| [루트 README.md](../README.md) | 로컬 실행·라우트·배포 진입점 |
 
 ---
 

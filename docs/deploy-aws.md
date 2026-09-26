@@ -1,8 +1,9 @@
 # AWS 배포 (Pintravel)
 
-실습 완료 기록(계획 대비 검증·이슈): [aws-deploy-report.md](./aws-deploy-report.md).
+실습 완료 기록(계획 대비 검증·이슈): [aws-deploy-report.md](./aws-deploy-report.md).  
+현재 배포: `https://dm0kbipnsg1gx.cloudfront.net` · 스택 `pintravel-prod` · 리전 `ap-northeast-2`.
 
-1차 목표는 **저비용 서버리스 + 문서화**입니다. 리전은 **ap-northeast-2 (서울)** 입니다.
+1차 목표는 **저비용 서버리스 + 문서화**입니다.
 
 실시간 협업(Socket.IO, UC7)은 Lambda/HTTP API와 맞지 않아 **이 스택에 포함하지 않습니다.** 로컬 `npm run dev:api`에서는 기존처럼 동작합니다.
 
@@ -74,7 +75,7 @@ NCP **Client Secret은 프론트 빌드에 넣지 않습니다.** 지도 SDK용 
 
 ## 배포 순서
 
-사전 도구: AWS CLI, [SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html), Node 20, `make` (`sam build` makefile). Windows에서는 WSL 또는 GitHub Actions로 빌드하는 것이 안전합니다.
+사전 도구: AWS CLI, [SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html), Node 20, `make` (`sam build` makefile). Windows는 `winget`으로 AWS CLI·SAM·GnuWin32 Make를 넣은 뒤 Make 경로(`C:\Program Files (x86)\GnuWin32\bin`)를 PATH에 추가하세요. 터미널을 연 뒤에 PATH를 바꿨으면 창을 다시 엽니다.
 
 1. SSM 파라미터를 넣습니다.
 2. API + CloudFront + S3 버킷:
@@ -103,7 +104,9 @@ aws cloudfront create-invalidation --distribution-id "$DIST" --paths "/*"
 
 스택 출력 `CloudFrontUrl`이 사이트 HTTPS 주소입니다. 브라우저는 `/api/...`를 같은 출처로 호출합니다 (로컬 Vite 프록시와 동일한 형태).
 
-`main` 푸시 또는 workflow_dispatch: [.github/workflows/deploy-aws.yml](../.github/workflows/deploy-aws.yml).
+지도·축제 데이터는 Atlas가 비어 있으면 안 보입니다. 로컬 DB를 옮길 때는 `mongodump`/`mongorestore`를 **`--archive`** 로 하는 편이 안전합니다. Lambda가 읽는 DB는 SSM `MONGODB_URI`이며, restore에 쓴 연결과 **같아야** 합니다. URI를 바꾼 뒤에는 Lambda를 한 번 재시작하세요 (`update-function-configuration` 등).
+
+GitHub Actions([.github/workflows/deploy-aws.yml](../.github/workflows/deploy-aws.yml)): `main` 푸시(해당 경로) 또는 workflow_dispatch. 저장소 시크릿 `AWS_ROLE_ARN`(OIDC), `VITE_X_NCP_APIGW_API_KEY_ID`. OIDC 스택을 아직 안 올렸으면 위의 수동 `sam deploy`와 S3 sync를 씁니다.
 
 ## 로컬 vs Lambda
 
@@ -126,7 +129,9 @@ aws cloudfront create-invalidation --distribution-id "$DIST" --paths "/*"
 
 ## 성공 기준
 
-- `https://<distribution>.cloudfront.net` 랜딩·로그인·지도 REST
-- 같은 호스트의 `/health` 가 Lambda를 탐
-- 시크릿이 저장소에 없음
+2026-09-25 CloudFront에서 확인함. 상세는 [aws-deploy-report.md](./aws-deploy-report.md).
+
+- `https://dm0kbipnsg1gx.cloudfront.net` 랜딩·로그인·마이페이지·지도 REST·일정 생성
+- 같은 호스트의 `/health` 가 `{ "ok": true, "service": "pintravel-api" }`
+- 시크릿이 저장소에 없음 (SSM)
 - 협업 소켓은 범위 밖임을 이 문서에 명시
