@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 import logoUrl from '../assets/logo.png'
 import { createSession, logout } from '../lib/api'
+import { areCollabSessionsEnabled, COLLAB_SESSIONS_UNAVAILABLE_MESSAGE } from '../lib/collabAvailability'
 import { clearPintravelClientStorage } from '../lib/clearPintravelStorage'
 import { copyTextToClipboard } from '../lib/copyToClipboard'
 import { resolveShareableOrigin } from '../lib/shareableOrigin'
@@ -96,6 +97,11 @@ export function MapNavBar() {
   }
 
   async function onCreateSession() {
+    if (!areCollabSessionsEnabled()) {
+      setSessionUrl(null)
+      setSessionError(COLLAB_SESSIONS_UNAVAILABLE_MESSAGE)
+      return
+    }
     if (!token) {
       nav(`/login?next=${encodeURIComponent('/map')}`)
       return

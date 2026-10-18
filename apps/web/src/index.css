@@ -3348,12 +3348,15 @@ button.homeLandingCta {
   top: 72px;
   right: 18px;
   z-index: 101;
+  max-width: min(420px, calc(100vw - 36px));
   border-radius: 10px;
   padding: 10px 12px;
   background: #ffffff;
   color: #b91c1c;
   font-size: 14px;
-  font-weight: 900;
+  font-weight: 700;
+  line-height: 1.45;
+  white-space: normal;
   box-shadow: 0 10px 26px rgba(15, 23, 42, 0.16);
 }
 

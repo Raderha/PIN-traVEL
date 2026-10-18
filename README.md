@@ -98,10 +98,11 @@ PIN-traVEL/
 
 ## AWS 배포
 
-서버리스 1차(REST: 인증, 지도, 축제, 일정, 마이페이지)는 배포·검증까지 완료했습니다. Socket.IO 협업(UC7)은 Lambda와 맞지 않아 **클라우드에 포함하지 않습니다.** 로컬 `npm run dev:api`에서는 기존처럼 동작합니다.
+서버리스 1차(REST: 인증, 지도, 축제, 일정, 마이페이지)는 배포·검증까지 완료했습니다. Socket.IO 협업(UC7)은 Lambda와 맞지 않아 **클라우드에 포함하지 않습니다.** 프로덕션에서 「세션 생성」은 API를 호출하지 않고 안내 메시지만 보여 줍니다. 로컬 `npm run dev`에서는 기존처럼 세션을 만들 수 있습니다.
 
 - 재현 절차: [docs/deploy-aws.md](docs/deploy-aws.md)
 - 계획 대비 이슈·검증: [docs/aws-deploy-report.md](docs/aws-deploy-report.md)
+- 일정·세션 등 앱 수정 후 재배포: [docs/release-notes-2026-10-web.md](docs/release-notes-2026-10-web.md)
 - 인프라: [infra/aws/template.yaml](infra/aws/template.yaml) (`sam build` / `sam deploy`)
 - GitHub Actions: [`.github/workflows/deploy-aws.yml`](.github/workflows/deploy-aws.yml) — 시크릿 `AWS_ROLE_ARN`, `VITE_X_NCP_APIGW_API_KEY_ID`. OIDC 역할은 아직 안 켠 경우 수동 배포와 동일하게 `sam deploy` + S3 sync.
 

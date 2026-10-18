@@ -29,7 +29,11 @@ import {
   type SummaryPin,
 } from '../lib/api'
 import { concatPathSegments, itineraryDayColor, legIndicesForStopDay } from '../lib/itineraryPaths'
-import { computeStopDayIndicesFromCart, flattenCartPinsWithLocation } from '../lib/itineraryStopDays'
+import {
+  computeStopDayIndicesFromCart,
+  flattenCartPinsWithLocation,
+  inferOvernightStayId,
+} from '../lib/itineraryStopDays'
 import { estimateJsonBytes, mapPerfLog } from '../lib/mapPerfLog'
 import { isHotelPin, itineraryHotelMarkerHtml, pinForRouteStopOrder } from '../lib/pinHotel'
 import { copyTextToClipboard } from '../lib/copyToClipboard'
@@ -42,6 +46,7 @@ import {
 import { buildRouteCompactForSchedule, buildVisitDaysFromCart, SCHEDULE_DEFAULT_REGION } from '../lib/schedulePersist'
 import { SessionCursorOverlay } from '../components/SessionCursorOverlay'
 import { useCollabSession } from '../hooks/useCollabSession'
+import { areCollabSessionsEnabled } from '../lib/collabAvailability'
 
 type NaverLatLng = unknown
 type NaverPoint = unknown
@@ -289,6 +294,14 @@ function appendHotelLastEveryDay(
   })
 }
 
+function appendPinKeepingHotelLast(day: SummaryPin[], pin: SummaryPin, hotelId: string | null): SummaryPin[] {
+  if (day.some((p) => p.id === pin.id)) return day
+  if (!hotelId) return [...day, pin]
+  const rest = day.filter((p) => p.id !== hotelId)
+  const hotel = day.find((p) => p.id === hotelId)
+  return hotel ? [...rest, pin, hotel] : [...day, pin]
+}
+
 function isHotelLastOnAllDays(days: SummaryPin[][], hotelId: string): boolean {
   return days.length > 0 && days.every((day) => day.length > 0 && day[day.length - 1]?.id === hotelId)
 }
@@ -494,15 +507,33 @@ function loadNaverMapScript(onAuthFailure?: () => void) {
   return naverMapScriptPromise
 }
 
-function loadStoredCartDays() {
-  if (typeof window === 'undefined') return [[]] as SummaryPin[][]
+function emptyCartState(): { cartDays: SummaryPin[][]; tripHotelId: string | null } {
+  return { cartDays: [[]], tripHotelId: null }
+}
+
+function loadStoredCartState(): { cartDays: SummaryPin[][]; tripHotelId: string | null } {
+  if (typeof window === 'undefined') return emptyCartState()
   try {
     const raw = localStorage.getItem(CART_STORAGE_KEY)
-    if (!raw) return [[]] as SummaryPin[][]
-    const parsed = JSON.parse(raw) as SummaryPin[][]
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : ([[]] as SummaryPin[][])
+    if (!raw) return emptyCartState()
+    const parsed = JSON.parse(raw) as unknown
+    if (Array.isArray(parsed)) {
+      const cartDays = parsed.length > 0 ? (parsed as SummaryPin[][]) : ([[]] as SummaryPin[][])
+      return { cartDays, tripHotelId: inferOvernightStayId(cartDays) }
+    }
+    if (parsed && typeof parsed === 'object' && Array.isArray((parsed as { cartDays?: unknown }).cartDays)) {
+      const cartDays = (parsed as { cartDays: SummaryPin[][] }).cartDays
+      const days = cartDays.length > 0 ? cartDays : ([[]] as SummaryPin[][])
+      const storedId = (parsed as { tripHotelId?: unknown }).tripHotelId
+      const tripHotelId =
+        typeof storedId === 'string' && storedId
+          ? storedId
+          : inferOvernightStayId(days)
+      return { cartDays: days, tripHotelId }
+    }
+    return emptyCartState()
   } catch {
-    return [[]] as SummaryPin[][]
+    return emptyCartState()
   }
 }
 
@@ -605,9 +636,9 @@ export function MapPage() {
   const [pinDetailError, setPinDetailError] = useState<string | null>(null)
   const pinDetailCacheRef = useRef(new Map<string, SummaryPin>())
   const [overlapPinIndexes, setOverlapPinIndexes] = useState<Record<string, number>>({})
-  const [cartDays, setCartDays] = useState<SummaryPin[][]>(() => loadStoredCartDays())
+  const [cartDays, setCartDays] = useState<SummaryPin[][]>(() => loadStoredCartState().cartDays)
   /** 여러 일차 맨 끝에 자동 배치되는 숙소(다른 숙소를 담으면 교체) */
-  const [tripHotelId, setTripHotelId] = useState<string | null>(null)
+  const [tripHotelId, setTripHotelId] = useState<string | null>(() => loadStoredCartState().tripHotelId)
   const [activeCartDay, setActiveCartDay] = useState(0)
   const [cartPanelOpen, setCartPanelOpen] = useState(true)
   const [draggingPin, setDraggingPin] = useState<{ dayIndex: number; pinId: string } | null>(null)
@@ -685,18 +716,25 @@ export function MapPage() {
   useEffect(() => {
     if (hotelTailSyncMigrated.current) return
     hotelTailSyncMigrated.current = true
-    if (tripHotelId != null) return
     const days = cartDays
-    if (days.length < 2) return
-    for (let d = 0; d < days.length; d++) {
-      const day = days[d]
-      const last = day[day.length - 1]
-      if (!last || !isHotelPin(last)) continue
-      if (!isHotelLastOnAllDays(days, last.id)) {
+    const inferred = tripHotelId ?? inferOvernightStayId(days)
+    if (!inferred) {
+      if (days.length < 2) return
+      for (let d = 0; d < days.length; d++) {
+        const last = days[d][days[d].length - 1]
+        if (!last || !isHotelPin(last)) continue
         setTripHotelId(last.id)
-        setCartDays(appendHotelLastEveryDay(days, last, null))
+        if (!isHotelLastOnAllDays(days, last.id)) {
+          setCartDays(appendHotelLastEveryDay(days, last, null))
+        }
         return
       }
+      return
+    }
+    if (tripHotelId == null) setTripHotelId(inferred)
+    const hotel = days.flat().find((p) => p.id === inferred)
+    if (hotel && !isHotelLastOnAllDays(days, inferred)) {
+      setCartDays(appendHotelLastEveryDay(days, hotel, null))
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- 초기 장바구니 스냅샷만 검사
   }, [])
@@ -761,7 +799,7 @@ export function MapPage() {
 
   const collab = useCollabSession({
     sessionId: collabSessionId,
-    enabled: Boolean(collabSessionId && readAuthToken()),
+    enabled: Boolean(collabSessionId && readAuthToken() && areCollabSessionsEnabled()),
     mapReady,
     mapRef,
     getNaverMaps,
@@ -791,8 +829,8 @@ export function MapPage() {
 
   useEffect(() => {
     if (collabSessionId) return
-    localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(cartDays))
-  }, [cartDays, collabSessionId])
+    localStorage.setItem(CART_STORAGE_KEY, JSON.stringify({ cartDays, tripHotelId }))
+  }, [cartDays, tripHotelId, collabSessionId])
 
   useEffect(() => {
     if (!selectedPin || !itineraryRoute || !confirmedItineraryBasics) return
@@ -1038,7 +1076,9 @@ export function MapPage() {
     } else {
       setCartDays((days) => {
         if (days.some((day) => day.some((cartPin) => cartPin.id === pin.id))) return days
-        return days.map((day, index) => (index === activeCartDay ? [...day, pin] : day))
+        return days.map((day, index) =>
+          index === activeCartDay ? appendPinKeepingHotelLast(day, pin, tripHotelId) : day,
+        )
       })
     }
     setCartPanelOpen(true)
@@ -1217,7 +1257,9 @@ export function MapPage() {
     } else {
       setCartDays((days) => {
         if (days.some((day) => day.some((cartPin) => cartPin.id === pin.id))) return days
-        return days.map((day, index) => (index === activeCartDay ? [...day, pin] : day))
+        return days.map((day, index) =>
+          index === activeCartDay ? appendPinKeepingHotelLast(day, pin, tripHotelId) : day,
+        )
       })
     }
     setCartPanelOpen(true)
@@ -1229,16 +1271,18 @@ export function MapPage() {
 
   function addCartDay() {
     const nextDayIndex = cartDays.length
-    const hid = tripHotelId
+    const hid = tripHotelId ?? inferOvernightStayId(cartDays)
     setCartDays((days) => {
+      const stayId = hid ?? inferOvernightStayId(days)
       const next = [...days, []]
       const lastIdx = next.length - 1
-      if (hid) {
-        const hotel = days.flat().find((p) => p.id === hid)
+      if (stayId) {
+        const hotel = days.flat().find((p) => p.id === stayId)
         if (hotel) next[lastIdx] = [hotel]
       }
       return next
     })
+    if (!tripHotelId && hid) setTripHotelId(hid)
     setActiveCartDay(nextDayIndex)
   }
 
@@ -1260,8 +1304,16 @@ export function MapPage() {
       const movingPin = sourceDay.find((pin) => pin.id === draggingPin.pinId)
       if (!movingPin) return days
 
-      const withoutMovingPin = days.map((day) => day.filter((pin) => pin.id !== draggingPin.pinId))
-      const targetDay = [...(withoutMovingPin[targetDayIndex] ?? [])]
+      const stayId = tripHotelId ?? inferOvernightStayId(days)
+      const isOvernightStay = Boolean(stayId && draggingPin.pinId === stayId)
+
+      const withoutMovingPin = isOvernightStay
+        ? days.map((day, index) =>
+            index === draggingPin.dayIndex ? day.filter((pin) => pin.id !== draggingPin.pinId) : day,
+          )
+        : days.map((day) => day.filter((pin) => pin.id !== draggingPin.pinId))
+
+      const targetDay = [...(withoutMovingPin[targetDayIndex] ?? [])].filter((pin) => pin.id !== movingPin.id)
       const insertIndex = targetPinId ? targetDay.findIndex((pin) => pin.id === targetPinId) : targetDay.length
       targetDay.splice(insertIndex >= 0 ? insertIndex : targetDay.length, 0, movingPin)
 
@@ -1804,6 +1856,15 @@ export function MapPage() {
       const firstIdx = legIndicesForStopDay(stopDay, D)[0]
       if (firstIdx === 0) {
         pushMarker(new maps.LatLng(dep.lat, dep.lng), createItineraryDepartureMarkerHtml())
+      } else if (firstIdx != null && firstIdx > 0) {
+        const prev = route.stops[firstIdx - 1]
+        if (prev) {
+          const pd = stopDay[prev.order - 1] ?? D
+          pushMarker(
+            new maps.LatLng(prev.lat, prev.lng),
+            createItineraryStopMarkerHtml(prev.order, pd, cartDays, tripHotelId),
+          )
+        }
       }
       route.stops.forEach((s) => {
         const d = stopDay[s.order - 1] ?? 0

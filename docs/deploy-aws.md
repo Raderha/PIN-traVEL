@@ -119,7 +119,7 @@ GitHub Actions([.github/workflows/deploy-aws.yml](../.github/workflows/deploy-aw
 
 ## 제한 · 비용 메모
 
-- **Socket.IO 미배포.** 협업 세션 실시간 동기화는 클라우드 1차에 없습니다.
+- **Socket.IO 미배포.** 협업 세션 실시간 동기화는 클라우드 1차에 없습니다. 웹 빌드(`import.meta.env.PROD`)에서 「세션 생성」은 안내만 표시합니다. 다시 켜려면 `VITE_COLLAB_SESSIONS=1`.
 - Lambda **콜드 스타트**와 Mongo/SSM 초기화로 첫 요청이 느릴 수 있습니다. 타임아웃 29초 (일정+Gemini).
 - Gemini·네이버 Directions는 외부 API 한도/과금에 따릅니다.
 - CloudFront 기본 도메인(`*.cloudfront.net`)으로도 접속 가능. 커스텀 도메인·ACM은 선택입니다.
