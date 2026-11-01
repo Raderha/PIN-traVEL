@@ -103,6 +103,7 @@ PIN-traVEL/
 - 재현 절차: [docs/deploy-aws.md](docs/deploy-aws.md)
 - 계획 대비 이슈·검증: [docs/aws-deploy-report.md](docs/aws-deploy-report.md)
 - 일정·세션 등 앱 수정 후 재배포: [docs/release-notes-2026-10-web.md](docs/release-notes-2026-10-web.md)
+- Grafana·CloudWatch 모니터링 실습: [docs/observability-grafana.md](docs/observability-grafana.md)
 - 인프라: [infra/aws/template.yaml](infra/aws/template.yaml) (`sam build` / `sam deploy`)
 - GitHub Actions: [`.github/workflows/deploy-aws.yml`](.github/workflows/deploy-aws.yml) — 시크릿 `AWS_ROLE_ARN`, `VITE_X_NCP_APIGW_API_KEY_ID`. OIDC 역할은 아직 안 켠 경우 수동 배포와 동일하게 `sam deploy` + S3 sync.
 
