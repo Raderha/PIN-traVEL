@@ -1,11 +1,11 @@
 # 모니터링 실습 보고서 — Grafana + CloudWatch
 
-- 일자: 2026-11-01
+- 일자: 2026-11-01 ~ 2026-11-02
 - 대상 사이트: `https://dm0kbipnsg1gx.cloudfront.net`
 - 스택: `pintravel-prod` · 리전 `ap-northeast-2`
 - 목적: 이미 배포된 PIN-traVEL의 호출 수·지연·오류를 Grafana 한 화면에서 보고, 이상 시 메일로 알리기
 
-인프라 구축 기록은 [aws-deploy-report.md](./aws-deploy-report.md)를 참고하시면 됩니다. 이 문서는 **운영을 위한 보는 눈**을 만드는 실습입니다.
+인프라 구축 기록은 [aws-deploy-report.md](./aws-deploy-report.md), 이 실습의 완료 기록은 [observability-grafana-report.md](./observability-grafana-report.md)를 참고하시면 됩니다. 이 문서는 **운영을 위한 보는 눈**을 만드는 절차입니다.
 
 ---
 
@@ -93,9 +93,11 @@ SSM을 잠깐 틀었다가 **반드시 원복**한 뒤 Lambda를 재시작합니
 
 ---
 
-## 결과 (진행 후 기입)
+## 결과
 
-- Grafana 대시보드: (미완료)
-- k6 후 지표 변화: (미완료)
-- 장애 재현·원복: (미완료)
-- 이메일 알람: (미완료)
+완료. 검증·캡처·시각 대조는 [observability-grafana-report.md](./observability-grafana-report.md)에 정리했습니다.
+
+- Grafana 대시보드 PIN-traVEL: CloudWatch 연결, Invocations·Duration·4xx·5xx
+- k6 `/health` 후 Invocations 상승, 오류 ≈ 0
+- SSM `MONGODB_URI` 오설정 → `/health` 500 → API 5xx 그래프 → 즉시 원복
+- 알람 `pintravel-prod-api-5xx` + SNS 메일, 실제 장애 시각 15:49 KST (= 06:49 UTC)

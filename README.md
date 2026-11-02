@@ -4,7 +4,7 @@
 
 - 팀명: 개발 6팀
 - 구성: **npm workspaces** 모노레포 — `apps/web`(프론트) · `apps/api`(백엔드 API)
-- 클라우드(1차): S3 + CloudFront + API Gateway + Lambda, MongoDB Atlas, SSM. 재현은 [docs/deploy-aws.md](docs/deploy-aws.md), 실습 완료 기록은 [docs/aws-deploy-report.md](docs/aws-deploy-report.md).
+- 클라우드(1차): S3 + CloudFront + API Gateway + Lambda, MongoDB Atlas, SSM. 재현은 [docs/deploy-aws.md](docs/deploy-aws.md), 실습 완료 기록은 [docs/aws-deploy-report.md](docs/aws-deploy-report.md). 모니터링은 [docs/observability-grafana.md](docs/observability-grafana.md), 완료 보고서는 [docs/observability-grafana-report.md](docs/observability-grafana-report.md).
 
 배포된 HTTPS 사이트(서울 `pintravel-prod`): `https://dm0kbipnsg1gx.cloudfront.net`  
 (`GET /health` → `{ "ok": true, "service": "pintravel-api" }`)
@@ -19,6 +19,9 @@ PIN-traVEL/
   docs/
     deploy-aws.md              AWS 재현·운영 가이드
     aws-deploy-report.md       배포 실습 완료 보고서
+    observability-grafana.md   Grafana·CloudWatch 실습 절차
+    observability-grafana-report.md  모니터링 실습 완료 보고서
+    images/observability/      대시보드·알람 캡처
   infra/aws/                   SAM 템플릿, samconfig, GitHub OIDC
   .github/workflows/
     deploy-aws.yml             main 푸시·수동 실행 시 SAM + 프론트 배포 (OIDC)
@@ -103,7 +106,7 @@ PIN-traVEL/
 - 재현 절차: [docs/deploy-aws.md](docs/deploy-aws.md)
 - 계획 대비 이슈·검증: [docs/aws-deploy-report.md](docs/aws-deploy-report.md)
 - 일정·세션 등 앱 수정 후 재배포: [docs/release-notes-2026-10-web.md](docs/release-notes-2026-10-web.md)
-- Grafana·CloudWatch 모니터링 실습: [docs/observability-grafana.md](docs/observability-grafana.md)
+- Grafana·CloudWatch 모니터링: [docs/observability-grafana.md](docs/observability-grafana.md) (절차), [docs/observability-grafana-report.md](docs/observability-grafana-report.md) (완료·캡처)
 - 인프라: [infra/aws/template.yaml](infra/aws/template.yaml) (`sam build` / `sam deploy`)
 - GitHub Actions: [`.github/workflows/deploy-aws.yml`](.github/workflows/deploy-aws.yml) — 시크릿 `AWS_ROLE_ARN`, `VITE_X_NCP_APIGW_API_KEY_ID`. OIDC 역할은 아직 안 켠 경우 수동 배포와 동일하게 `sam deploy` + S3 sync.
 
