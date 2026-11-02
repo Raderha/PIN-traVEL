@@ -124,7 +124,7 @@ SNS 토픽 `pintravel-alerts`에 이메일 구독 후 Confirm.
 `put-metric-alarm`으로 `pintravel-prod-api-5xx` 생성.  
 먼저 `set-alarm-state`로 메일 경로만 시험한 뒤, SSM을 다시 잠깐 틀어 **실제 5xx**로 알람을 울렸다.
 
-2026-11-02 **15:49 KST** (= 06:49 UTC)에 Grafana 호출이 오르고, 같은 시각에 `OK → ALARM`, datapoint `3.0` ≥ threshold `1` 메일이 도착했다.
+2026-11-02 **15:49 KST** (= 06:49 UTC)에 Grafana 호출이 오르고, **15:50 KST**에 `OK → ALARM`, datapoint `3.0` ≥ threshold `1` 메일이 도착했다.(지표 집계 지연으로 알람 평가 시점과 그래프 값이 다를 수 있음.)
 
 ![15:49 KST 대시보드와 SNS 알람 메일](images/observability/grafana-sns-alarm.png)
 
