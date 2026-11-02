@@ -132,20 +132,7 @@ SNS 토픽 `pintravel-alerts`에 이메일 구독 후 Confirm.
 
 ---
 
-## 5. 발생한 문제와 해결
-
-| 증상 | 원인 | 대응 |
-|------|------|------|
-| Grafana 데이터소스 실패·혼란 | Assume Role / Endpoint 자리 표시를 그대로 입력 | 리전·액세스 키만 채우고 Save & test |
-| 패널에 네임스페이스가 안 보임 | 첫 Choose는 CloudWatch **Metrics** (네임스페이스가 아님) | Namespace `AWS/Lambda` 또는 `AWS/ApiGateway`는 그다음 |
-| Duration 그래프가 Invocations처럼 보임 | 쿼리 Metric name이 Invocations로 남음 | Duration으로 바꾸고 저장 |
-| 장애인데 Lambda Errors가 0 | 함수는 500을 반환하고 정상 종료 | 관측·알람은 API **5xx** |
-| 시험 메일은 오는데 실제 장애 메일이 늦음 | 알람 주기 60초, 원복을 너무 빨리 하면 평가 전에 끝남 | `/health` 500을 1~2분 유지한 뒤 원복 |
-| 시크릿 유출 위험 | URI를 채팅·Git에 붙임 | SSM get/put만 로컬, Git에는 이름만 |
-
----
-
-## 6. 검증 결과 (완료)
+## 5. 검증 결과 (완료)
 
 | 항목 | 결과 |
 |------|------|
@@ -160,57 +147,6 @@ SNS 토픽 `pintravel-alerts`에 이메일 구독 후 Confirm.
 
 ---
 
-## 7. 명시적 범위 밖
-
-- MongoDB Atlas 콘솔 메트릭, AWS X-Ray 전면 도입.
-- Grafana Cloud 유료 워크스페이스, EC2에 Grafana 상시 가동.
-- 일정 생성·축제 목록에 k6 부하.
-- 프로덕션 SSM을 긴 시간 깨 둔 채 방치.
-
-실사용자가 없어도 파이프라인(지표 → 그래프 → 알람)은 성립한다. 트래픽이 늘면 같은 패널에 점이 더 쌓일 뿐이다.
-
----
-
-## 8. GitHub 문서에 캡처 넣기
-
-이미지는 **저장소 안 파일**이어야 GitHub README/docs에 보인다. 채팅에만 올린 그림은 커밋되지 않는다.
-
-1. PNG/JPG를 `docs/images/observability/` (또는 `docs/images/` 아래 원하는 폴더)에 복사한다.
-2. 메일 주소·액세스 키·URI가 보이면 가리거나 자른다.
-3. 마크다운에서 **그 `.md` 파일 기준 상대 경로**로 넣는다.
-
-같은 폴더의 보고서에서:
-
-```markdown
-![15:49 알람](images/observability/grafana-sns-alarm.png)
-```
-
-루트 `README.md`에서:
-
-```markdown
-![15:49 알람](docs/images/observability/grafana-sns-alarm.png)
-```
-
-파일 이름만 바꾸면 원하는 절 바로 아래에 붙이면 된다. 이번 실습 캡처는 아래 네 장이다.
-
-| 파일 | 내용 |
-|------|------|
-| `grafana-5xx-first.png` | 첫 재현 14:54 KST, 5xx = 4 |
-| `health-ok.png` | 원복 후 `/health` |
-| `grafana-after-restore.png` | 5xx 하강 |
-| `grafana-sns-alarm.png` | 15:49 그래프 + 알람 메일 |
-
----
-
-## 9. 이후 운영 짧은 메모
-
-- Grafana는 필요할 때만 `docker compose up -d`. 끄면 지표 수집은 CloudWatch가 계속한다.
-- 알람을 끄려면 `aws cloudwatch delete-alarms --alarm-names pintravel-prod-api-5xx` 또는 콘솔에서 disable.
-- Atlas 비밀번호를 바꾸면 SSM `MONGODB_URI`와 Lambda 재시작을 같이 한다. 이 실습과 같은 5xx·메일이 다시 나온다.
-- k6는 `/health`만. 본문 API에 반복 호출하지 않는다.
-
----
-
-## 10. 결론
+## 6. 결론
 
 Docker Grafana로 CloudWatch 지표를 묶고, k6로 정상 호출을 확인한 뒤, SSM Mongo URI 오설정으로 5xx를 재현·원복했다. API Gateway 5xx 알람과 SNS 메일이 **15:49 KST**에 그래프와 같이 울린 것을 확인했다. 관측 파이프라인은 여기까지가 1차 완료이다.
